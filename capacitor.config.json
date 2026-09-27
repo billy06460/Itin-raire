@@ -1,0 +1,11 @@
+{
+  "appId": "com.itinerairepeages.app",
+  "appName": "Itineraire & Peages",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
