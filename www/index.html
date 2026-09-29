@@ -966,7 +966,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // un tunnel urbain a un seuil intermédiaire (accès moins précisément
   // repéré que les gares officielles).
   function findTollsOnRoute(coords, thresholds){
-    thresholds = thresholds || { Bpv: 250, Ech: 140, Urb: 200 };
+    thresholds = thresholds || { Bpv: 250, Ech: 250, Urb: 200 };
     const maxPossible = Math.max(thresholds.Bpv, thresholds.Ech, thresholds.Urb || 200);
     const coarse = sampleRoute(coords, 50); // points de recherche rapprochés pour un filtrage précis
     const cum = cumulativeDistances(coords);
@@ -1114,7 +1114,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       // Recherche 100% locale (jeu de données officiel embarqué) : ne
       // dépend d'aucun appel réseau, donc fonctionne même hors ligne
       // et n'est jamais bloquée par une restriction WebView/CORS.
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 140, Urb: 200 });
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
       // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
       // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
       // circulation est toujours "vers la destination" puisque seuls les
@@ -1255,7 +1255,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       else drawRoute(from, lastArr, route);
 
       const previous = tollStations;
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 140, Urb: 200 });
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
         s.alerted = prev ? prev.alerted : false;
