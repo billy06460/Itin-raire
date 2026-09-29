@@ -1127,8 +1127,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   async function routeBetween(a, b){
     let res;
     try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`;
-      res = await fetchWithTimeout(url, {}, 12000);
+      const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson&steps=true`;
+      res = await fetchWithTimeout(url, {}, 15000);
     } catch (e) {
       throw new Error("Impossible de joindre le service d'itinéraire (réseau bloqué ou hors ligne).");
     }
@@ -1136,10 +1136,28 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     const data = await res.json();
     if (!data.routes || !data.routes.length) throw new Error('Aucun itinéraire routier trouvé entre ces deux villes.');
     const r = data.routes[0];
+
+    // Points où le trajet prend réellement une bretelle (entrée/sortie
+    // d'autoroute, embranchement) : à la manière de TollGuru, ça permet de
+    // ne valider un péage d'échangeur QUE si le trajet emprunte vraiment
+    // cette bretelle, et pas seulement s'il passe à proximité sur la voie
+    // principale.
+    const RAMP_MANEUVERS = new Set(['on ramp', 'off ramp', 'fork', 'exit roundabout', 'exit rotary', 'roundabout']);
+    const rampPoints = [];
+    (r.legs || []).forEach(leg => {
+      (leg.steps || []).forEach(step => {
+        const m = step.maneuver;
+        if (m && RAMP_MANEUVERS.has(m.type) && Array.isArray(m.location)){
+          rampPoints.push([m.location[1], m.location[0]]); // OSRM: [lon,lat] -> [lat,lon]
+        }
+      });
+    });
+
     return {
       coords: r.geometry.coordinates.map(c => [c[1], c[0]]),
       distance: r.distance,
-      duration: r.duration
+      duration: r.duration,
+      rampPoints
     };
   }
 
@@ -1232,12 +1250,28 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // (seuil serré, pour ne pas attraper une sortie voisine non empruntée),
   // un tunnel urbain a un seuil intermédiaire (accès moins précisément
   // repéré que les gares officielles).
-  function findTollsOnRoute(coords, thresholds){
+  function findTollsOnRoute(coords, thresholds, rampPoints){
     thresholds = thresholds || { Bpv: 250, Ech: 250, Urb: 200 };
     const maxPossible = Math.max(thresholds.Bpv, thresholds.Ech, thresholds.Urb || 200);
     const coarse = sampleRoute(coords, 50); // points de recherche rapprochés pour un filtrage précis
     const cum = cumulativeDistances(coords);
     const matches = [];
+
+    // Distance jusqu'à la manœuvre de bretelle la plus proche (sortie,
+    // entrée, embranchement...). À la manière de TollGuru : un péage de
+    // type "échangeur" ou "tunnel urbain" n'a de sens que si le trajet
+    // prend RÉELLEMENT une bretelle à cet endroit, pas seulement s'il
+    // passe à proximité sur la voie principale.
+    const RAMP_PROXIMITY_METERS = 400;
+    function nearestRampDist(lat, lon){
+      if (!rampPoints || !rampPoints.length) return null; // pas de données de manœuvres : on ne filtre pas
+      let best = Infinity;
+      for (let i = 0; i < rampPoints.length; i++){
+        const d = haversine(lat, lon, rampPoints[i][0], rampPoints[i][1]);
+        if (d < best) best = d;
+      }
+      return best;
+    }
 
     TOLLS.forEach(t => {
       if (hiddenTollNames.has(t.name)) return; // masqué manuellement par l'utilisateur
@@ -1250,18 +1284,30 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         const d = haversine(t.lat, t.lon, coarse[i][0], coarse[i][1]);
         if (d < best) best = d;
       }
-      if (best <= limit){
-        const { idx } = nearestIndexOnRoute(t.lat, t.lon, coords);
-        matches.push({
-          name: t.name,
-          network: t.route + ' · ' + t.typeLabel + (t.voies ? ' · ' + t.voies + ' voies' : ''),
-          concessionnaire: t.concessionnaire || null,
-          lat: t.lat,
-          lon: t.lon,
-          km: cum[idx] / 1000,
-          dist: best
-        });
+      if (best > limit) return;
+
+      // Filtre bretelle : uniquement pour les péages de type échangeur/
+      // tunnel urbain, seulement si on a bien reçu des manœuvres pour ce
+      // trajet, et seulement dans la zone ambiguë (au-delà de 150 m) : un
+      // point très proche de la voie principale est du signal fort qu'il
+      // s'agit d'une vraie barrière traversée par tous (comme Peyruis,
+      // typée "échangeur" dans le fichier officiel mais bien payée par le
+      // trafic de passage) — on ne le filtre donc jamais dans ce cas.
+      if ((t.type === 'Ech' || t.type === 'Urb') && rampPoints && rampPoints.length && best > 150){
+        const rampDist = nearestRampDist(t.lat, t.lon);
+        if (rampDist !== null && rampDist > RAMP_PROXIMITY_METERS) return;
       }
+
+      const { idx } = nearestIndexOnRoute(t.lat, t.lon, coords);
+      matches.push({
+        name: t.name,
+        network: t.route + ' · ' + t.typeLabel + (t.voies ? ' · ' + t.voies + ' voies' : ''),
+        concessionnaire: t.concessionnaire || null,
+        lat: t.lat,
+        lon: t.lon,
+        km: cum[idx] / 1000,
+        dist: best
+      });
     });
 
     // Une gare a un point par sens de circulation (D/G) dans le fichier
@@ -1375,7 +1421,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     // Recherche 100% locale (jeu de données officiel embarqué) : ne
     // dépend d'aucun appel réseau, donc fonctionne même hors ligne
     // et n'est jamais bloquée par une restriction WebView/CORS.
-    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
+    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
     // circulation est toujours "vers la destination" puisque seuls les
@@ -1466,7 +1512,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length){
-        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
+        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute && lastRoute.rampPoints);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -1602,7 +1648,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       else drawRoute(from, lastArr, route);
 
       const previous = tollStations;
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
         s.alerted = prev ? prev.alerted : false;
