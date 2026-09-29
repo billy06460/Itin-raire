@@ -1814,16 +1814,30 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   function exitNav(){
     navActive = false;
     document.body.classList.remove('nav-active');
+    const mapEl = document.getElementById('map');
     // On retire le style inline posé à l'entrée : la règle CSS de base
     // #map{...} (petite carte du formulaire) reprend la main.
-    document.getElementById('map').style.cssText = '';
+    mapEl.style.cssText = '';
+    // Astuce pour forcer la WebView à vraiment refaire son rendu (et pas
+    // garder un affichage figé de l'état plein écran précédent) : on
+    // masque puis réaffiche l'élément, ce qui force un recalcul complet
+    // au lieu d'un simple ajustement incrémental.
+    mapEl.style.display = 'none';
+    void mapEl.offsetHeight; // force le navigateur à appliquer le masquage avant de continuer
+    mapEl.style.display = '';
     releaseWakeLock();
+    // On repart d'un fournisseur de tuiles propre, comme à l'entrée en
+    // plein écran : évite de garder un fournisseur dégradé/mal en point
+    // suite au plein écran, pour le retour à la petite carte aussi.
+    tileProviderIndex = 0;
+    loadTileProvider(0);
     // Même logique qu'à l'entrée en plein écran : le retour à la petite
     // taille doit aussi forcer Leaflet à recalculer sa taille ET à
     // redessiner ses tuiles, sinon la carte reste vide/mal positionnée
     // dans son encart.
     const refreshMap = () => {
       map.invalidateSize();
+      map.setView(map.getCenter(), map.getZoom(), { animate: false });
       if (currentTileLayer) currentTileLayer.redraw();
     };
     requestAnimationFrame(() => {
