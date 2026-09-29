@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Itinéraire &amp; Péages</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
@@ -330,6 +330,44 @@
     text-align:center;
   }
 
+  .pending-toll-card{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:var(--panel-2);
+    border:1px solid var(--red);
+    border-radius:12px;
+    padding:10px 12px;
+  }
+  .pending-toll-card.called{ border-color:#2d5c3f; }
+  .pending-toll-dot{
+    width:11px; height:11px; border-radius:50%;
+    background:var(--red); flex-shrink:0;
+  }
+  .pending-toll-card.called .pending-toll-dot{ background:#3ecf72; }
+  .pending-toll-info{ flex:1; min-width:0; }
+  .pending-toll-info b{ display:block; font-size:13.5px; }
+  .pending-toll-info span{ font-size:11.5px; color:var(--text-dim); }
+  .pending-toll-call{
+    flex-shrink:0;
+    border:none;
+    border-radius:9px;
+    padding:9px 13px;
+    font:inherit;
+    font-weight:700;
+    font-size:12.5px;
+    cursor:pointer;
+    background:#2d5c3f;
+    color:#eafff0;
+  }
+  .pending-toll-card.called .pending-toll-call{ background:var(--panel); color:var(--text-dim); }
+
+  /* Statut appelé / pas appelé, réutilisé dans la liste et sur la carte */
+  .status-dot{
+    width:10px; height:10px; border-radius:50%;
+    background:var(--red); flex-shrink:0;
+  }
+  .status-dot.called{ background:#3ecf72; }
   .toll-alert-overlay{
     display:none;
     position:fixed;
@@ -344,29 +382,34 @@
   .toll-alert-card{
     width:100%;
     max-width:520px;
+    min-height:50vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
     background:var(--panel);
     border:1px solid var(--line);
-    border-top:3px solid var(--amber);
-    border-radius:18px 18px 0 0;
-    padding:22px 22px 26px;
+    border-top:4px solid var(--amber);
+    border-radius:24px 24px 0 0;
+    padding:32px 26px calc(34px + env(safe-area-inset-bottom,0px));
     text-align:center;
     animation:slideUp .2s ease-out;
   }
   @keyframes slideUp{ from{ transform:translateY(30px); opacity:0; } to{ transform:translateY(0); opacity:1; } }
-  .toll-alert-icon{ font-size:34px; margin-bottom:4px; }
-  .toll-alert-kicker{ margin:0; font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:var(--amber); font-weight:700; }
-  .toll-alert-card h3{ margin:6px 0 2px; font-size:20px; }
-  .toll-alert-meta{ margin:0 0 4px; font-size:13px; color:var(--text-dim); }
-  .toll-alert-dist{ margin:0 0 18px; font-size:14px; color:var(--teal); font-weight:600; }
-  .toll-alert-actions{ display:flex; gap:10px; }
+  .toll-alert-icon{ font-size:64px; margin-bottom:6px; }
+  .toll-alert-kicker{ margin:0; font-size:14px; letter-spacing:.05em; text-transform:uppercase; color:var(--amber); font-weight:700; }
+  .toll-alert-card h3{ margin:10px 0 4px; font-size:30px; line-height:1.15; }
+  .toll-alert-meta{ margin:0 0 6px; font-size:16px; color:var(--text-dim); }
+  .toll-alert-dist{ margin:0 0 30px; font-size:19px; color:var(--teal); font-weight:700; }
+  .toll-alert-actions{ display:flex; gap:12px; width:100%; }
   .toll-alert-actions button{
     flex:1;
     border:none;
-    border-radius:10px;
-    padding:13px;
+    border-radius:12px;
+    padding:18px;
     font:inherit;
     font-weight:700;
-    font-size:14.5px;
+    font-size:17px;
     cursor:pointer;
   }
   .toll-alert-call{ background:var(--panel-2); color:var(--text-dim); border:1px solid var(--line) !important; }
@@ -396,12 +439,14 @@
   .toll-card{
     background:var(--panel);
     border:1px solid var(--line);
+    border-left:3px solid var(--red);
     border-radius:12px;
     padding:12px 14px;
     display:flex;
     align-items:center;
     gap:12px;
   }
+  .toll-card.called{ border-left-color:#3ecf72; }
   .toll-idx{
     width:30px;height:30px;
     border-radius:8px;
@@ -418,13 +463,24 @@
   .toll-info{flex:1; min-width:0;}
   .toll-info .name{font-weight:600; font-size:14.5px; margin:0 0 2px;}
   .toll-info .meta{font-size:12px; color:var(--text-dim); margin:0;}
+  .toll-right{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; }
   .toll-km{
     font-size:12.5px;
     color:var(--teal);
     font-weight:600;
-    flex-shrink:0;
-    text-align:right;
   }
+  .toll-call-btn{
+    border:none;
+    border-radius:8px;
+    padding:6px 10px;
+    font:inherit;
+    font-weight:700;
+    font-size:11.5px;
+    cursor:pointer;
+    background:#2d5c3f;
+    color:#eafff0;
+  }
+  .toll-card.called .toll-call-btn{ background:var(--panel-2); color:var(--text-dim); }
 
   .empty-state{
     margin:30px 18px;
@@ -853,9 +909,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // elle-même (seuil large), un péage d'échangeur est sur une bretelle
   // (seuil serré, pour ne pas attraper une sortie voisine non empruntée).
   function findTollsOnRoute(coords, thresholds){
-    thresholds = thresholds || { Bpv: 300, Ech: 150 };
+    thresholds = thresholds || { Bpv: 250, Ech: 90 };
     const maxPossible = Math.max(thresholds.Bpv, thresholds.Ech);
-    const coarse = sampleRoute(coords, 100); // points de recherche rapprochés pour un filtrage précis
+    const coarse = sampleRoute(coords, 50); // points de recherche rapprochés pour un filtrage précis
     const cum = cumulativeDistances(coords);
     const matches = [];
 
@@ -915,11 +971,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   function drawTollMarkers(){
     tollMarkers.clearLayers();
     tollStations.forEach((s, i) => {
+      const bg = s.called ? '#2d9d5c' : '#ef5b5b';
       const icon = L.divIcon({
         className: '',
-        html: `<div style="background:#f5b301;color:#1a1300;font:700 10px 'Space Grotesk';width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;border:2px solid #14161a;">${i + 1}</div>`
+        html: `<div style="background:${bg};color:#fff;font:700 10px 'Space Grotesk';width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;border:2px solid #14161a;">${i + 1}</div>`
       });
-      L.marker([s.lat, s.lon], { icon }).addTo(tollMarkers).bindPopup(`<b>${escapeHtml(s.name)}</b>${s.network ? '<br>' + escapeHtml(s.network) : ''}`);
+      L.marker([s.lat, s.lon], { icon }).addTo(tollMarkers).bindPopup(`<b>${escapeHtml(s.name)}</b>${s.network ? '<br>' + escapeHtml(s.network) : ''}<br>${s.called ? '✅ Appelé' : '🔴 Pas encore appelé'}`);
     });
   }
 
@@ -939,15 +996,24 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
     tollStations.forEach((s, i) => {
       const card = document.createElement('div');
-      card.className = 'toll-card';
+      card.className = 'toll-card' + (s.called ? ' called' : '');
       card.innerHTML = `
         <div class="toll-idx">${i + 1}</div>
         <div class="toll-info">
           <p class="name">${escapeHtml(s.name)}</p>
           <p class="meta">${escapeHtml(s.network || 'Réseau autoroutier concédé')}</p>
         </div>
-        <div class="toll-km">${s.km.toFixed(0)} km</div>
+        <div class="toll-right">
+          <div class="toll-km">${s.km.toFixed(0)} km</div>
+          <button type="button" class="toll-call-btn">${s.called ? '✅ Appelé' : '📞 Appeler'}</button>
+        </div>
       `;
+      card.querySelector('.toll-call-btn').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        callToll(s);
+        card.classList.add('called');
+        ev.currentTarget.textContent = '✅ Appelé';
+      });
       card.addEventListener('click', () => {
         showView('route');
         map.setView([s.lat, s.lon], 13);
@@ -990,7 +1056,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       // Recherche 100% locale (jeu de données officiel embarqué) : ne
       // dépend d'aucun appel réseau, donc fonctionne même hors ligne
       // et n'est jamais bloquée par une restriction WebView/CORS.
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 300, Ech: 150 });
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 90 });
+      // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
+      // mais conserve le statut "appelé" d'une session à l'autre.
+      tollStations.forEach(s => { s.alerted = false; s.passed = false; s.called = calledTollNames.has(s.name); });
 
       drawTollMarkers();
       renderTollList(dep, arr);
@@ -1000,8 +1069,6 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       $('goto-tolls').disabled = false;
       $('tab-tolls').disabled = false;
 
-      // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller)
-      tollStations.forEach(s => { s.alerted = false; s.passed = false; });
       $('tracking-toggle').disabled = false;
       if (watchId !== null) stopTracking(); // un nouvel itinéraire coupe un suivi précédent
       if (navActive) exitNav();
@@ -1017,15 +1084,35 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   });
 
   // ---- Alertes de proximité péage ----
-  // Numéros à renseigner plus tard : clé = nom exact de la gare (champ
-  // "name" tel qu'affiché), valeur = numéro à composer. Tant qu'une gare
-  // n'a pas de numéro ici, le bouton "Appeler" reste désactivé.
+  // Numéros spécifiques par gare (clé = nom exact de la gare). Tant qu'une
+  // gare n'a pas d'entrée ici, le numéro de test ci-dessous est utilisé.
   const TOLL_PHONE_NUMBERS = {
     // "Nemours": "0800000000",
   };
+  // Numéro de test temporaire, utilisé pour TOUTES les gares tant qu'aucun
+  // numéro officiel par péage n'est configuré ci-dessus.
+  const DEFAULT_TOLL_PHONE = '0689666889';
+
+  function getTollPhone(station){
+    return TOLL_PHONE_NUMBERS[station.name] || DEFAULT_TOLL_PHONE;
+  }
+
+  // Gares déjà "appelées" pendant cette session : persiste même si
+  // l'itinéraire est recalculé (déviation) et régénère la liste des péages.
+  let calledTollNames = new Set();
+
+  function callToll(station){
+    calledTollNames.add(station.name);
+    station.called = true;
+    window.location.href = 'tel:' + getTollPhone(station);
+    renderTollList(lastDep, lastArr);
+    drawTollMarkers();
+    renderPendingTollBar();
+  }
 
   const ALERT_RADIUS_METERS = 10000; // 10 km
-  const PASSED_RADIUS_METERS = 300;  // en-dessous, on considère le péage franchi
+  const PASSED_RADIUS_METERS = 300;  // en-dessous, on considère le péage franchi (physiquement)
+  const OFF_ROUTE_METERS = 1200;     // au-delà, on considère qu'on s'est écarté du tracé calculé
   let watchId = null;
   let alertQueue = [];
   let alertShowing = false;
@@ -1065,16 +1152,13 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('toll-alert-dist').textContent = '≈ ' + (distMeters / 1000).toFixed(1) + ' km à parcourir';
 
     const callBtn = $('toll-alert-call');
-    const phone = TOLL_PHONE_NUMBERS[station.name];
-    if (phone){
-      callBtn.disabled = false;
-      callBtn.title = 'Appeler ' + phone;
-      callBtn.onclick = () => { window.location.href = 'tel:' + phone; };
-    } else {
-      callBtn.disabled = true;
-      callBtn.title = 'Numéro à configurer prochainement';
-      callBtn.onclick = null;
-    }
+    callBtn.disabled = false;
+    callBtn.title = 'Appeler ' + getTollPhone(station);
+    callBtn.textContent = station.called ? '✅ Déjà appelé' : '📞 Appeler';
+    callBtn.onclick = () => {
+      callToll(station);
+      callBtn.textContent = '✅ Déjà appelé';
+    };
 
     $('toll-alert-overlay').classList.add('show');
     playAlertSound();
@@ -1082,20 +1166,90 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   $('toll-alert-dismiss').addEventListener('click', () => {
     $('toll-alert-overlay').classList.remove('show');
+    renderPendingTollBar(); // le péage reste affiché (en attente) tant qu'il n'est pas franchi
     showNextAlert();
   });
 
+  let isRecalculating = false;
+  let lastRecalcAt = 0;
+  const RECALC_COOLDOWN_MS = 45000; // évite de recalculer en boucle en cas de signal GPS instable
+
+  async function recalcRouteFromPosition(lat, lon){
+    if (isRecalculating || !lastArr) return;
+    isRecalculating = true;
+    lastRecalcAt = Date.now();
+    $('nav-next-toll').innerHTML = '🔄 Écart détecté, recalcul de l\u2019itinéraire…';
+    try {
+      const from = { lat, lon, label: 'Position actuelle' };
+      const route = await routeBetween(from, lastArr);
+      routeCoords = route.coords;
+      routeCumMeters = cumulativeDistances(routeCoords);
+      routeTotalMeters = route.distance;
+      routeTotalSeconds = route.duration;
+      lastRoute = route;
+
+      if (routeLine) routeLine.setLatLngs(routeCoords);
+      else drawRoute(from, lastArr, route);
+
+      const previous = tollStations;
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 90 });
+      tollStations.forEach(s => {
+        const prev = previous.find(p => p.name === s.name);
+        s.alerted = prev ? prev.alerted : false;
+        s.passed = prev ? prev.passed : false;
+        s.called = calledTollNames.has(s.name);
+      });
+
+      drawTollMarkers();
+      renderTollList(lastDep, lastArr);
+      $('sum-tolls').textContent = tollStations.length;
+      $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
+      renderPendingTollBar();
+    } catch (e) {
+      console.warn('Recalcul impossible', e);
+      $('nav-next-toll').textContent = "Impossible de recalculer l'itinéraire pour le moment.";
+    } finally {
+      isRecalculating = false;
+    }
+  }
+
   function checkProximity(lat, lon){
+    if (!routeCoords.length || !routeCumMeters.length) return;
+
+    const { idx, dist: offRouteDist } = nearestIndexOnRoute(lat, lon, routeCoords);
+    const onRoute = offRouteDist <= OFF_ROUTE_METERS;
+
+    if (!onRoute){
+      if (navActive && Date.now() - lastRecalcAt > RECALC_COOLDOWN_MS){
+        recalcRouteFromPosition(lat, lon);
+      }
+    }
+
+    const currentMeters = onRoute ? routeCumMeters[idx] : null;
+
     tollStations.forEach(station => {
       if (station.passed) return;
-      const d = haversine(lat, lon, station.lat, station.lon);
-      if (d <= PASSED_RADIUS_METERS){
+
+      // Filet de sécurité, toujours actif : si on passe physiquement à
+      // proximité immédiate d'une gare, elle est considérée franchie.
+      const directDist = haversine(lat, lon, station.lat, station.lon);
+      if (directDist <= PASSED_RADIUS_METERS){
         station.passed = true;
+        renderPendingTollBar();
         return;
       }
-      if (!station.alerted && d <= ALERT_RADIUS_METERS){
+
+      if (!onRoute) return; // hors tracé : pas d'alerte tant qu'on n'a pas retrouvé/recalculé la route
+
+      const aheadMeters = (station.km * 1000) - currentMeters;
+      if (aheadMeters < 0){
+        station.passed = true; // déjà derrière nous sur le tracé
+        renderPendingTollBar();
+        return;
+      }
+      if (!station.alerted && aheadMeters <= ALERT_RADIUS_METERS){
         station.alerted = true;
-        queueTollAlert(station, d);
+        queueTollAlert(station, aheadMeters);
       }
     });
   }
@@ -1124,13 +1278,43 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('nav-remaining-dist').textContent = (remainingMeters / 1000).toFixed(0) + ' km';
     $('nav-remaining-time').textContent = formatDuration(remainingSeconds);
 
-    const currentKm = routeCumMeters[idx] / 1000;
-    const next = tollStations.find(s => !s.passed && s.km >= currentKm - 0.3);
-    if (next){
+    renderPendingTollBar(routeCumMeters[idx] / 1000);
+  }
+
+  // Affiche, tant qu'il n'est pas franchi, le péage dont l'alerte des 10 km
+  // a déjà été validée (OK) — avec son statut appelé/pas appelé et un
+  // bouton d'appel toujours accessible. Sans péage "en attente", retombe
+  // sur un message générique (prochain péage, ou trajet sans péage).
+  function renderPendingTollBar(currentKm){
+    const el = $('nav-next-toll');
+    const pending = tollStations
+      .filter(s => s.alerted && !s.passed)
+      .sort((a, b) => a.km - b.km)[0];
+
+    if (pending){
+      el.innerHTML = `
+        <div class="pending-toll-card ${pending.called ? 'called' : ''}">
+          <div class="pending-toll-dot"></div>
+          <div class="pending-toll-info">
+            <b>${escapeHtml(pending.name)}</b>
+            <span>${pending.called ? 'Prévenu ✅' : 'Pas encore prévenu'}</span>
+          </div>
+          <button type="button" class="pending-toll-call">${pending.called ? '✅' : '📞 Appeler'}</button>
+        </div>`;
+      el.querySelector('.pending-toll-call').addEventListener('click', () => callToll(pending));
+      return;
+    }
+
+    if (!tollStations.length){ el.textContent = 'Aucun péage sur ce trajet'; return; }
+
+    const next = tollStations.find(s => !s.passed);
+    if (!next){ el.textContent = '✅ Tous les péages du trajet sont franchis'; return; }
+
+    if (currentKm !== undefined){
       const aheadKm = Math.max(0, next.km - currentKm);
-      $('nav-next-toll').textContent = `🔔 Prochain péage : ${next.name} — ${aheadKm.toFixed(1)} km`;
+      el.textContent = `🔔 Prochain péage : ${next.name} — ${aheadKm.toFixed(1)} km`;
     } else {
-      $('nav-next-toll').textContent = tollStations.length ? '✅ Tous les péages du trajet sont franchis' : 'Aucun péage sur ce trajet';
+      el.textContent = `🔔 Prochain péage : ${next.name}`;
     }
   }
 
