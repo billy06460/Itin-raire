@@ -363,6 +363,7 @@
     border:1px solid var(--red);
     border-radius:12px;
     padding:10px 12px;
+    cursor:pointer;
   }
   .pending-toll-card.called{ border-color:#2d5c3f; }
   .pending-toll-dot{
@@ -382,10 +383,10 @@
     font-weight:700;
     font-size:12.5px;
     cursor:pointer;
-    background:#2d5c3f;
-    color:#eafff0;
+    background:var(--red);
+    color:#fff;
   }
-  .pending-toll-card.called .pending-toll-call{ background:var(--panel); color:var(--text-dim); }
+  .pending-toll-card.called .pending-toll-call{ background:#2d9d5c; color:#eafff0; }
 
   /* Statut appelé / pas appelé, réutilisé dans la liste et sur la carte */
   .status-dot{
@@ -438,7 +439,8 @@
     font-size:17px;
     cursor:pointer;
   }
-  .toll-alert-call{ background:var(--panel-2); color:var(--text-dim); border:1px solid var(--line) !important; }
+  .toll-alert-call{ background:var(--red); color:#fff; }
+  .toll-alert-call.called{ background:#2d9d5c; color:#eafff0; }
 
   /* ---- Panneau de réglages ---- */
   .settings-card{
@@ -543,7 +545,6 @@
     color:var(--amber);
     font-size:15px;
   }
-  .toll-alert-call:not(:disabled){ background:#2d5c3f; color:#eafff0; }
   .toll-alert-ok{ background:var(--amber); color:#1a1300; }
 
   /* ---- Vue péages ---- */
@@ -639,10 +640,10 @@
     font-weight:700;
     font-size:11.5px;
     cursor:pointer;
-    background:#2d5c3f;
-    color:#eafff0;
+    background:var(--red);
+    color:#fff;
   }
-  .toll-card.called .toll-call-btn{ background:var(--panel-2); color:var(--text-dim); }
+  .toll-card.called .toll-call-btn{ background:#2d9d5c; color:#eafff0; }
 
   .empty-state{
     margin:30px 18px;
@@ -1053,10 +1054,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       if (acc >= stepMeters){ samples.push(coords[i]); acc = 0; }
     }
     samples.push(coords[coords.length - 1]);
-    if (samples.length > 160){
-      const factor = Math.ceil(samples.length / 160);
-      return samples.filter((_, i) => i % factor === 0);
-    }
+    // Pas de plafond sur le nombre de points : sur un long trajet (des
+    // centaines de km), plafonner écarterait trop les points de recherche
+    // et ferait rater des gares réellement sur le tracé. Même sur un très
+    // long trajet, quelques milliers de points restent rapides à traiter.
     return samples;
   }
 
@@ -1526,6 +1527,30 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300, 120, 500]);
   }
 
+  function displayTollPopup(station, distMeters){
+    $('toll-alert-name').textContent = station.name;
+    $('toll-alert-meta').textContent = [station.network, station.direction].filter(Boolean).join(' · ');
+    $('toll-alert-concess').textContent = station.concessionnaire
+      ? '🏢 Concessionnaire : ' + station.concessionnaire
+      : '🏢 Concessionnaire : non identifié pour cette gare';
+    $('toll-alert-dist').textContent = distMeters !== undefined
+      ? '≈ ' + (distMeters / 1000).toFixed(1) + ' km à parcourir'
+      : '';
+
+    const callBtn = $('toll-alert-call');
+    callBtn.disabled = false;
+    callBtn.title = 'Appeler ' + getTollPhone(station);
+    callBtn.textContent = station.called ? '✅ Déjà appelé' : '📞 Appeler';
+    callBtn.classList.toggle('called', !!station.called);
+    callBtn.onclick = () => {
+      callToll(station);
+      callBtn.textContent = '✅ Déjà appelé';
+      callBtn.classList.add('called');
+    };
+
+    $('toll-alert-overlay').classList.add('show');
+  }
+
   function queueTollAlert(station, distMeters){
     alertQueue.push({ station, distMeters });
     if (!alertShowing) showNextAlert();
@@ -1535,24 +1560,15 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     if (!alertQueue.length){ alertShowing = false; return; }
     alertShowing = true;
     const { station, distMeters } = alertQueue.shift();
-    $('toll-alert-name').textContent = station.name;
-    $('toll-alert-meta').textContent = [station.network, station.direction].filter(Boolean).join(' · ');
-    $('toll-alert-concess').textContent = station.concessionnaire
-      ? '🏢 Concessionnaire : ' + station.concessionnaire
-      : '🏢 Concessionnaire : non identifié pour cette gare';
-    $('toll-alert-dist').textContent = '≈ ' + (distMeters / 1000).toFixed(1) + ' km à parcourir';
-
-    const callBtn = $('toll-alert-call');
-    callBtn.disabled = false;
-    callBtn.title = 'Appeler ' + getTollPhone(station);
-    callBtn.textContent = station.called ? '✅ Déjà appelé' : '📞 Appeler';
-    callBtn.onclick = () => {
-      callToll(station);
-      callBtn.textContent = '✅ Déjà appelé';
-    };
-
-    $('toll-alert-overlay').classList.add('show');
+    displayTollPopup(station, distMeters);
     playAlertSound();
+  }
+
+  // Réouverture manuelle (tap sur le bandeau "péage en attente") : montre
+  // à nouveau la popup complète, même si le péage a déjà été appelé —
+  // aucun son ni vibration, ce n'est pas une nouvelle alerte.
+  function reopenTollPopup(station){
+    displayTollPopup(station, undefined);
   }
 
   $('toll-alert-dismiss').addEventListener('click', () => {
@@ -1693,7 +1709,11 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
           </div>
           <button type="button" class="pending-toll-call">${pending.called ? '✅' : '📞 Appeler'}</button>
         </div>`;
-      el.querySelector('.pending-toll-call').addEventListener('click', () => callToll(pending));
+      el.querySelector('.pending-toll-call').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        callToll(pending);
+      });
+      el.querySelector('.pending-toll-card').addEventListener('click', () => reopenTollPopup(pending));
       return;
     }
 
