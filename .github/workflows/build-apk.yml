@@ -29,6 +29,12 @@ jobs:
       - name: Ajouter la plateforme Android
         run: npx cap add android
 
+      - name: Ajouter les permissions de localisation
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q "ACCESS_FINE_LOCATION" "$MANIFEST" || sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n</manifest>#' "$MANIFEST"
+          grep -q "ACCESS_FINE_LOCATION" "$MANIFEST" || { echo "Permission de localisation non ajoutee"; exit 1; }
+
       - name: Synchroniser le code web
         run: npx cap sync android
 
