@@ -1295,12 +1295,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
       // Filtre bretelle : uniquement pour les péages de type échangeur/
       // tunnel urbain, seulement si on a bien reçu des manœuvres pour ce
-      // trajet, et seulement dans la zone ambiguë (au-delà de 70 m) : un
-      // point vraiment collé à la voie principale est du signal fort qu'il
+      // trajet, et seulement dans la zone ambiguë (au-delà de 35 m) : un
+      // point quasiment sur la voie principale est du signal fort qu'il
       // s'agit d'une vraie barrière traversée par tous (comme Peyruis,
       // typée "échangeur" dans le fichier officiel mais bien payée par le
       // trafic de passage) — on ne le filtre donc jamais dans ce cas.
-      if ((t.type === 'Ech' || t.type === 'Urb') && rampPoints && rampPoints.length && best > 70){
+      if ((t.type === 'Ech' || t.type === 'Urb') && rampPoints && rampPoints.length && best > 35){
         const rampDist = nearestRampDist(t.lat, t.lon, tollKm);
         if (rampDist !== null && rampDist > RAMP_PROXIMITY_METERS) return;
       }
