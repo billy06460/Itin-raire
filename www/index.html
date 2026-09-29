@@ -137,6 +137,17 @@
     padding:12px 0;
   }
   .field input::placeholder{color:#5c626e;}
+  .locate-btn{
+    flex-shrink:0;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--teal);
+    width:32px; height:32px;
+    border-radius:8px;
+    font-size:15px;
+    cursor:pointer;
+  }
+  .locate-btn:disabled{ opacity:.5; cursor:not-allowed; }
   .swap-btn{
     align-self:center;
     background:var(--panel-2);
@@ -468,6 +479,7 @@
         <div class="field">
           <span class="tag">DÉPART</span>
           <input id="dep" type="text" placeholder="Ville de départ" autocomplete="off" required>
+          <button type="button" id="use-my-location" class="locate-btn" title="Utiliser ma position actuelle">📍</button>
         </div>
         <button class="swap-btn" id="swap-btn" type="button" title="Inverser">⇅</button>
         <div class="field">
@@ -613,6 +625,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   let routeTotalSeconds = 0;
   let navActive = false;
   let liveMarker = null;
+  let depOverride = null; // {lat, lon, label} si "ma position actuelle" est utilisée comme départ
 
   function setStatus(msg, isError, loading){
     const el = $('status');
@@ -633,7 +646,54 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   $('goto-tolls').addEventListener('click', () => showView('tolls'));
   $('swap-btn').addEventListener('click', () => {
     const a = $('dep').value; $('dep').value = $('arr').value; $('arr').value = a;
+    depOverride = null;
   });
+
+  $('dep').addEventListener('input', () => {
+    if (depOverride && $('dep').value !== depOverride.label) depOverride = null;
+  });
+
+  async function useMyLocation(){
+    if (!('geolocation' in navigator)){
+      setStatus("La géolocalisation n'est pas disponible sur cet appareil.", true);
+      return;
+    }
+    const btn = $('use-my-location');
+    btn.disabled = true;
+    setStatus('Localisation en cours…', false, true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        let label = 'Ma position actuelle';
+        try {
+          const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=fr`;
+          const res = await fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000);
+          if (res.ok){
+            const data = await res.json();
+            const a = data && data.address;
+            if (a) label = a.city || a.town || a.village || a.municipality || a.county || label;
+          }
+        } catch (e) { console.warn('Géocodage inverse indisponible', e); }
+
+        depOverride = { lat: latitude, lon: longitude, label: '📍 ' + label };
+        $('dep').value = depOverride.label;
+        btn.disabled = false;
+        setStatus('Position actuelle définie comme point de départ.');
+      },
+      (err) => {
+        console.warn('Erreur géolocalisation (départ)', err);
+        btn.disabled = false;
+        const msg = err.code === 1
+          ? "Localisation refusée : autorise la localisation pour l'app dans les réglages du téléphone."
+          : "Impossible d'obtenir ta position (GPS/réseau indisponible pour le moment).";
+        setStatus(msg, true);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    );
+  }
+
+  $('use-my-location').addEventListener('click', useMyLocation);
 
   // ---- Utilitaires géo ----
   function haversine(lat1, lon1, lat2, lon2){
@@ -910,7 +970,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
     try {
       setStatus('Recherche des villes…', false, true);
-      const [dep, arr] = await Promise.all([geocode(depQuery), geocode(arrQuery)]);
+      const dep = (depOverride && $('dep').value === depOverride.label)
+        ? { lat: depOverride.lat, lon: depOverride.lon, label: depOverride.label.replace('📍 ', '') }
+        : await geocode(depQuery);
+      const arr = await geocode(arrQuery);
       lastDep = dep; lastArr = arr;
 
       setStatus('Calcul de l\u2019itinéraire…', false, true);
@@ -1090,26 +1153,55 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   $('nav-quit').addEventListener('click', () => { stopTracking(); exitNav(); });
 
+  let gpsFixReceived = false;
+  let gpsWaitTimer = null;
+
+  function geoErrorMessage(err){
+    if (err.code === 1) return "Localisation refusée : va dans les réglages du téléphone (Paramètres > Applis > cette app > Autorisations > Localisation) et active-la, puis relance le trajet.";
+    if (err.code === 2) return "Position indisponible pour le moment : vérifie que le GPS/la localisation est activé(e) sur le téléphone.";
+    if (err.code === 3) return "Signal GPS trop long à obtenir : essaie à l'extérieur, loin des bâtiments, avec le GPS activé (pas seulement le mode économie de batterie).";
+    return "Suivi GPS interrompu.";
+  }
+
   function startTracking(){
     if (!('geolocation' in navigator)){
       setStatus("La géolocalisation n'est pas disponible sur cet appareil/navigateur.", true);
       return;
     }
+
+    gpsFixReceived = false;
+    $('nav-next-toll').textContent = '📡 Recherche du signal GPS…';
+    clearTimeout(gpsWaitTimer);
+    gpsWaitTimer = setTimeout(() => {
+      if (!gpsFixReceived){
+        $('nav-next-toll').textContent = "📡 Toujours en attente du GPS… vérifie que la localisation est activée et que tu es à l'extérieur.";
+      }
+    }, 10000);
+
+    const onFix = (pos) => {
+      gpsFixReceived = true;
+      clearTimeout(gpsWaitTimer);
+      const { latitude, longitude } = pos.coords;
+      checkProximity(latitude, longitude);
+      ensureLiveMarker(latitude, longitude);
+      if (navActive){
+        map.setView([latitude, longitude], map.getZoom(), { animate: true });
+        updateNavBar(latitude, longitude);
+      }
+    };
+    const onError = (err) => {
+      console.warn('Erreur géolocalisation', err);
+      if (!gpsFixReceived) setStatus(geoErrorMessage(err), true);
+    };
+
+    // Une prise de position immédiate (en plus du suivi continu ci-dessous)
+    // pour afficher un premier résultat le plus vite possible.
+    navigator.geolocation.getCurrentPosition(onFix, onError, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+
     watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        checkProximity(latitude, longitude);
-        ensureLiveMarker(latitude, longitude);
-        if (navActive){
-          map.setView([latitude, longitude], map.getZoom(), { animate: true });
-          updateNavBar(latitude, longitude);
-        }
-      },
-      (err) => {
-        console.warn('Erreur géolocalisation', err);
-        setStatus("Suivi GPS interrompu : vérifie que la localisation est autorisée pour l'app.", true);
-      },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      onFix,
+      onError,
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 25000 }
     );
     $('tracking-toggle').classList.add('active');
     $('tracking-toggle').textContent = '■ Arrêter le trajet';
@@ -1117,6 +1209,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   function stopTracking(){
     if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    clearTimeout(gpsWaitTimer);
     $('tracking-toggle').classList.remove('active');
     $('tracking-toggle').textContent = '▶ Commencer le trajet';
   }
