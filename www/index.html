@@ -1506,17 +1506,29 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     navActive = true;
     document.body.classList.add('nav-active');
     requestWakeLock();
+    // Verrou d'orientation best-effort (le verrou fiable est fait au niveau
+    // de l'activité Android elle-même, voir AndroidManifest) : utile pour
+    // les tests en navigateur, échoue silencieusement sinon.
+    try {
+      if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(() => {});
+    } catch (e) {}
     // Le passage en plein écran change la taille du conteneur de la carte ;
     // Leaflet doit recalculer sa taille APRÈS que le navigateur ait
     // effectivement appliqué ce nouveau layout, sinon il continue à
     // afficher des tuiles pour l'ancienne (petite) taille et le reste
-    // de l'écran reste noir. On relance donc invalidateSize() à plusieurs
-    // reprises pour couvrir les cas où le premier recalcul est trop tôt.
-    requestAnimationFrame(() => {
+    // de l'écran reste noir. invalidateSize() seul ne suffisant pas
+    // toujours à faire recharger les tuiles manquantes sur certaines
+    // WebView, on force en plus un redessin complet du calque de tuiles.
+    const refreshMap = () => {
       map.invalidateSize();
+      if (currentTileLayer) currentTileLayer.redraw();
+    };
+    requestAnimationFrame(() => {
+      refreshMap();
       map.setZoom(16);
-      setTimeout(() => map.invalidateSize(), 150);
-      setTimeout(() => map.invalidateSize(), 500);
+      setTimeout(refreshMap, 150);
+      setTimeout(refreshMap, 500);
+      setTimeout(refreshMap, 1200);
     });
   }
 
@@ -1533,7 +1545,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   // Filet de sécurité supplémentaire : si la fenêtre change de taille
   // (rotation, clavier, barres système) pendant le trajet, on recalcule.
-  window.addEventListener('resize', () => { if (navActive) map.invalidateSize(); });
+  window.addEventListener('resize', () => { if (navActive){ map.invalidateSize(); if (currentTileLayer) currentTileLayer.redraw(); } });
 
   $('nav-quit').addEventListener('click', () => { stopTracking(); exitNav(); });
 
