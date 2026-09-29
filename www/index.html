@@ -245,7 +245,9 @@
   /* ---- Mode trajet plein écran ---- */
   body.nav-active #map{
     position:fixed;
-    inset:0;
+    top:0; left:0; right:0; bottom:0;
+    width:100%;
+    height:100%;
     z-index:500;
     margin:0;
     border-radius:0;
@@ -371,7 +373,7 @@
   .toll-alert-overlay{
     display:none;
     position:fixed;
-    inset:0;
+    top:0; left:0; right:0; bottom:0;
     background:rgba(10,11,13,.72);
     z-index:1000;
     align-items:flex-end;
@@ -427,6 +429,21 @@
   }
   #view-tolls .head h2{margin:0; font-size:17px;}
   #view-tolls .head span{font-size:12.5px; color:var(--text-dim);}
+  .hidden-tolls-bar{
+    margin:0 18px 10px;
+    font-size:12px;
+    color:var(--text-dim);
+  }
+  .hidden-tolls-bar button{
+    background:none;
+    border:none;
+    color:var(--teal);
+    font:inherit;
+    font-size:12px;
+    text-decoration:underline;
+    cursor:pointer;
+    padding:0;
+  }
 
   #toll-list{
     flex:1;
@@ -438,16 +455,33 @@
   }
 
   .toll-card{
+    position:relative;
     background:var(--panel);
     border:1px solid var(--line);
     border-left:3px solid var(--red);
     border-radius:12px;
-    padding:12px 14px;
+    padding:12px 34px 12px 14px;
     display:flex;
     align-items:center;
     gap:12px;
   }
   .toll-card.called{ border-left-color:#3ecf72; }
+  .toll-hide-btn{
+    position:absolute;
+    top:8px; right:8px;
+    width:24px; height:24px;
+    border-radius:50%;
+    border:1px solid var(--line);
+    background:var(--panel-2);
+    color:var(--text-dim);
+    font-size:13px;
+    line-height:1;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .toll-hide-btn:active{ background:var(--red); color:#fff; }
   .toll-idx{
     width:30px;height:30px;
     border-radius:8px;
@@ -570,6 +604,7 @@
         <h2>Gares de péage</h2>
         <span id="tolls-route-label"></span>
       </div>
+      <div id="hidden-tolls-bar" class="hidden-tolls-bar" style="display:none;"></div>
       <div id="toll-list"></div>
     </section>
 
@@ -973,6 +1008,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     const matches = [];
 
     TOLLS.forEach(t => {
+      if (hiddenTollNames.has(t.name)) return; // masqué manuellement par l'utilisateur
       const limit = thresholds[t.type] !== undefined ? thresholds[t.type] : maxPossible;
       let best = Infinity;
       for (let i = 0; i < coarse.length; i++){
@@ -1046,6 +1082,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     const list = $('toll-list');
     list.innerHTML = '';
     $('tolls-route-label').textContent = dep.label + ' → ' + arr.label;
+    renderHiddenTollsBar();
 
     if (!tollStations.length){
       list.innerHTML = '<div class="empty-state">Aucune gare de péage détectée sur cet itinéraire.<br>(Trajet probablement hors réseau routier concédé.)</div>';
@@ -1056,6 +1093,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       const card = document.createElement('div');
       card.className = 'toll-card' + (s.called ? ' called' : '');
       card.innerHTML = `
+        <button type="button" class="toll-hide-btn" title="Masquer ce péage définitivement">✕</button>
         <div class="toll-idx">${i + 1}</div>
         <div class="toll-info">
           <p class="name">${escapeHtml(s.name)}</p>
@@ -1066,6 +1104,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
           <button type="button" class="toll-call-btn">${s.called ? '✅ Appelé' : '📞 Appeler'}</button>
         </div>
       `;
+      card.querySelector('.toll-hide-btn').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        hideToll(s.name);
+      });
       card.querySelector('.toll-call-btn').addEventListener('click', (ev) => {
         ev.stopPropagation();
         callToll(s);
@@ -1081,6 +1123,46 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   }
 
   // ---- Flux principal ----
+  async function planRoute(dep, arr){
+    lastDep = dep; lastArr = arr;
+
+    setStatus('Calcul de l\u2019itinéraire…', false, true);
+    const route = await routeBetween(dep, arr);
+    routeCoords = route.coords;
+    lastRoute = route;
+    routeCumMeters = cumulativeDistances(routeCoords);
+    routeTotalMeters = route.distance;
+    routeTotalSeconds = route.duration;
+    $('nav-dest').textContent = dep.label + ' → ' + arr.label;
+    drawRoute(dep, arr, route);
+
+    setStatus('Recherche des gares de péage sur le trajet…', false, true);
+    // Recherche 100% locale (jeu de données officiel embarqué) : ne
+    // dépend d'aucun appel réseau, donc fonctionne même hors ligne
+    // et n'est jamais bloquée par une restriction WebView/CORS.
+    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
+    // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
+    // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
+    // circulation est toujours "vers la destination" puisque seuls les
+    // péages réellement sur le tracé calculé sont retenus.
+    tollStations.forEach(s => { s.alerted = false; s.passed = false; s.called = calledTollNames.has(s.name); s.direction = 'Direction ' + arr.label; });
+
+    drawTollMarkers();
+    renderTollList(dep, arr);
+
+    $('sum-tolls').textContent = tollStations.length;
+    $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
+    $('goto-tolls').disabled = false;
+    $('tab-tolls').disabled = false;
+
+    $('tracking-toggle').disabled = false;
+    if (watchId !== null) stopTracking(); // un nouvel itinéraire coupe un suivi précédent
+    if (navActive) exitNav();
+    if (liveMarker){ map.removeLayer(liveMarker); liveMarker = null; }
+
+    setStatus(`Itinéraire calculé · ${tollStations.length} gare(s) de péage détectée(s).`);
+  }
+
   $('route-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const depQuery = $('dep').value.trim();
@@ -1098,43 +1180,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         ? { lat: depOverride.lat, lon: depOverride.lon, label: depOverride.label.replace('📍 ', '') }
         : await geocode(depQuery);
       const arr = await geocode(arrQuery);
-      lastDep = dep; lastArr = arr;
-
-      setStatus('Calcul de l\u2019itinéraire…', false, true);
-      const route = await routeBetween(dep, arr);
-      routeCoords = route.coords;
-      lastRoute = route;
-      routeCumMeters = cumulativeDistances(routeCoords);
-      routeTotalMeters = route.distance;
-      routeTotalSeconds = route.duration;
-      $('nav-dest').textContent = dep.label + ' → ' + arr.label;
-      drawRoute(dep, arr, route);
-
-      setStatus('Recherche des gares de péage sur le trajet…', false, true);
-      // Recherche 100% locale (jeu de données officiel embarqué) : ne
-      // dépend d'aucun appel réseau, donc fonctionne même hors ligne
-      // et n'est jamais bloquée par une restriction WebView/CORS.
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
-      // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
-      // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
-      // circulation est toujours "vers la destination" puisque seuls les
-      // péages réellement sur le tracé calculé sont retenus.
-      tollStations.forEach(s => { s.alerted = false; s.passed = false; s.called = calledTollNames.has(s.name); s.direction = 'Direction ' + arr.label; });
-
-      drawTollMarkers();
-      renderTollList(dep, arr);
-
-      $('sum-tolls').textContent = tollStations.length;
-      $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
-      $('goto-tolls').disabled = false;
-      $('tab-tolls').disabled = false;
-
-      $('tracking-toggle').disabled = false;
-      if (watchId !== null) stopTracking(); // un nouvel itinéraire coupe un suivi précédent
-      if (navActive) exitNav();
-      if (liveMarker){ map.removeLayer(liveMarker); liveMarker = null; }
-
-      setStatus(`Itinéraire calculé · ${tollStations.length} gare(s) de péage détectée(s).`);
+      await planRoute(dep, arr);
     } catch (err){
       console.error(err);
       setStatus(err.message || 'Une erreur est survenue.', true);
@@ -1161,6 +1207,52 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // l'itinéraire est recalculé (déviation) et régénère la liste des péages.
   let calledTollNames = new Set();
 
+  // Péages masqués manuellement par l'utilisateur (persisté sur l'appareil :
+  // reste actif pour tous les prochains trajets qui repasseraient par cette
+  // même gare, jusqu'à ce que l'utilisateur la réaffiche).
+  let hiddenTollNames = new Set();
+  try {
+    hiddenTollNames = new Set(JSON.parse(localStorage.getItem('hiddenTollNames') || '[]'));
+  } catch (e) { console.warn('Lecture péages masqués impossible', e); }
+
+  function saveHiddenTolls(){
+    try { localStorage.setItem('hiddenTollNames', JSON.stringify([...hiddenTollNames])); }
+    catch (e) { console.warn('Sauvegarde péages masqués impossible', e); }
+  }
+
+  function renderHiddenTollsBar(){
+    const bar = $('hidden-tolls-bar');
+    if (hiddenTollNames.size === 0){ bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    bar.style.display = 'block';
+    bar.innerHTML = `🚫 ${hiddenTollNames.size} péage(s) masqué(s) — <button type="button" id="unhide-all-btn">tout réafficher</button>`;
+    $('unhide-all-btn').addEventListener('click', () => {
+      hiddenTollNames.clear();
+      saveHiddenTolls();
+      renderHiddenTollsBar();
+      // Recalcule l'affichage avec les péages redevenus visibles
+      if (routeCoords.length){
+        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 });
+        tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
+        drawTollMarkers();
+        renderTollList(lastDep, lastArr);
+        $('sum-tolls').textContent = tollStations.length;
+        $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
+      }
+    });
+  }
+
+  function hideToll(name){
+    hiddenTollNames.add(name);
+    saveHiddenTolls();
+    tollStations = tollStations.filter(s => s.name !== name);
+    drawTollMarkers();
+    renderTollList(lastDep, lastArr);
+    renderHiddenTollsBar();
+    $('sum-tolls').textContent = tollStations.length;
+    $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
+    renderPendingTollBar();
+  }
+
   function callToll(station){
     calledTollNames.add(station.name);
     station.called = true;
@@ -1181,6 +1273,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   function playAlertSound(){
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      // Sur mobile, le contexte audio peut être suspendu quand l'écran est
+      // éteint ou l'app en arrière-plan : on le relance avant de sonner.
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
       const now = audioCtx.currentTime;
       [0, 0.22, 0.44].forEach((t, i) => {
         const osc = audioCtx.createOscillator();
@@ -1195,7 +1290,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         osc.stop(now + t + 0.2);
       });
     } catch (e) { console.warn('Son indisponible', e); }
-    if (navigator.vibrate) navigator.vibrate([180, 80, 180, 80, 260]);
+    // Vibration plus longue et insistante, pour se faire remarquer même
+    // écran éteint ou téléphone dans une poche.
+    if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300, 120, 500]);
   }
 
   function queueTollAlert(station, distMeters){
@@ -1383,9 +1480,32 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   }
 
   // ---- Mode plein écran "Commencer le trajet" ----
+  // ---- Écran qui reste allumé pendant le trajet ----
+  let wakeLock = null;
+
+  async function requestWakeLock(){
+    try {
+      if ('wakeLock' in navigator){
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { console.warn('Wake Lock indisponible', e); }
+  }
+
+  function releaseWakeLock(){
+    if (wakeLock){ wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+
+  // Le Wake Lock est automatiquement relâché par le navigateur quand l'app
+  // passe en arrière-plan : on le redemande dès qu'elle redevient visible.
+  document.addEventListener('visibilitychange', () => {
+    if (navActive && document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
+  });
+
   function enterNav(){
     navActive = true;
     document.body.classList.add('nav-active');
+    requestWakeLock();
     // Le passage en plein écran change la taille du conteneur de la carte ;
     // Leaflet doit recalculer sa taille APRÈS que le navigateur ait
     // effectivement appliqué ce nouveau layout, sinon il continue à
@@ -1403,6 +1523,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   function exitNav(){
     navActive = false;
     document.body.classList.remove('nav-active');
+    releaseWakeLock();
     requestAnimationFrame(() => {
       map.invalidateSize();
       if (routeLine) map.fitBounds(routeLine.getBounds(), { padding: [24, 24] });
@@ -1424,6 +1545,49 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     if (err.code === 2) return "Position indisponible pour le moment : vérifie que le GPS/la localisation est activé(e) sur le téléphone.";
     if (err.code === 3) return "Signal GPS trop long à obtenir : essaie à l'extérieur, loin des bâtiments, avec le GPS activé (pas seulement le mode économie de batterie).";
     return "Suivi GPS interrompu.";
+  }
+
+  // ---- Reprise d'un trajet en cours (app réduite puis rouverte) ----
+  function saveActiveTrip(){
+    if (!lastDep || !lastArr) return;
+    try {
+      localStorage.setItem('activeTrip', JSON.stringify({ dep: lastDep, arr: lastArr, ts: Date.now() }));
+    } catch (e) { console.warn('Sauvegarde du trajet actif impossible', e); }
+  }
+
+  function clearActiveTrip(){
+    try { localStorage.removeItem('activeTrip'); } catch (e) {}
+  }
+
+  async function resumeTrip(dep, arr){
+    $('dep').value = dep.label;
+    $('arr').value = arr.label;
+    $('calc-btn').disabled = true;
+    try {
+      await planRoute(dep, arr);
+      startTracking();
+      enterNav();
+    } catch (e){
+      console.error(e);
+      setStatus("Impossible de reprendre l'itinéraire (connexion nécessaire pour recalculer le trajet).", true);
+    } finally {
+      $('calc-btn').disabled = false;
+    }
+  }
+
+  function checkResumeTrip(){
+    try {
+      const raw = localStorage.getItem('activeTrip');
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!saved || !saved.dep || !saved.arr) { clearActiveTrip(); return; }
+      // On ne propose la reprise que si le trajet est récent (moins de 6h) :
+      // au-delà, il y a de bonnes chances que le trajet soit déjà terminé.
+      if (Date.now() - saved.ts > 6 * 60 * 60 * 1000) { clearActiveTrip(); return; }
+      const resume = confirm(`Un trajet est en cours :\n${saved.dep.label} → ${saved.arr.label}\n\nReprendre ce trajet ?`);
+      if (resume) resumeTrip(saved.dep, saved.arr);
+      else clearActiveTrip();
+    } catch (e) { console.warn('Vérification de reprise impossible', e); }
   }
 
   function startTracking(){
@@ -1468,6 +1632,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     );
     $('tracking-toggle').classList.add('active');
     $('tracking-toggle').textContent = '■ Arrêter le trajet';
+    saveActiveTrip();
   }
 
   function stopTracking(){
@@ -1475,12 +1640,17 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     clearTimeout(gpsWaitTimer);
     $('tracking-toggle').classList.remove('active');
     $('tracking-toggle').textContent = '▶ Commencer le trajet';
+    clearActiveTrip();
   }
 
   $('tracking-toggle').addEventListener('click', () => {
     if (watchId === null){ startTracking(); enterNav(); }
     else { stopTracking(); exitNav(); }
   });
+
+  // Au chargement de l'app, propose de reprendre un trajet resté en cours
+  // (app réduite ou fermée pendant un suivi actif).
+  checkResumeTrip();
 
 })();
 </script>
