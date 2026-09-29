@@ -1243,10 +1243,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       if (hiddenTollNames.has(t.name)) return; // masqué manuellement par l'utilisateur
       const limit = thresholds[t.type] !== undefined ? thresholds[t.type] : maxPossible;
       let best = Infinity;
+      // Pas de sortie anticipée : on a besoin de la vraie distance minimale
+      // (et pas juste "sous le seuil") pour départager fiablement les deux
+      // points D/G d'une même gare plus loin.
       for (let i = 0; i < coarse.length; i++){
         const d = haversine(t.lat, t.lon, coarse[i][0], coarse[i][1]);
         if (d < best) best = d;
-        if (best < limit) break; // pas besoin d'aller plus loin
       }
       if (best <= limit){
         const { idx } = nearestIndexOnRoute(t.lat, t.lon, coords);
@@ -1256,22 +1258,23 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
           concessionnaire: t.concessionnaire || null,
           lat: t.lat,
           lon: t.lon,
-          km: cum[idx] / 1000
+          km: cum[idx] / 1000,
+          dist: best
         });
       }
     });
 
-    // Dédoublonnage : deux points très proches en distance parcourue et
-    // portant le même nom correspondent aux deux sens de circulation.
-    const seen = new Set();
-    return matches
-      .sort((a, b) => a.km - b.km)
-      .filter(s => {
-        const key = s.name + '_' + Math.round(s.km / 1.2);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+    // Une gare a un point par sens de circulation (D/G) dans le fichier
+    // officiel : si les deux passent le seuil de détection, on ne garde
+    // que celui réellement le plus proche du tracé (donc le bon sens),
+    // jamais les deux à la fois.
+    const bestByName = new Map();
+    matches.forEach(m => {
+      const prev = bestByName.get(m.name);
+      if (!prev || m.dist < prev.dist) bestByName.set(m.name, m);
+    });
+
+    return Array.from(bestByName.values()).sort((a, b) => a.km - b.km);
   }
 
   // ---- Rendu carte / résumé ----
@@ -1815,10 +1818,23 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     // #map{...} (petite carte du formulaire) reprend la main.
     document.getElementById('map').style.cssText = '';
     releaseWakeLock();
-    requestAnimationFrame(() => {
+    // Même logique qu'à l'entrée en plein écran : le retour à la petite
+    // taille doit aussi forcer Leaflet à recalculer sa taille ET à
+    // redessiner ses tuiles, sinon la carte reste vide/mal positionnée
+    // dans son encart.
+    const refreshMap = () => {
       map.invalidateSize();
+      if (currentTileLayer) currentTileLayer.redraw();
+    };
+    requestAnimationFrame(() => {
+      refreshMap();
       if (routeLine) map.fitBounds(routeLine.getBounds(), { padding: [24, 24] });
-      setTimeout(() => map.invalidateSize(), 150);
+      setTimeout(refreshMap, 150);
+      setTimeout(refreshMap, 500);
+      setTimeout(() => {
+        refreshMap();
+        if (routeLine) map.fitBounds(routeLine.getBounds(), { padding: [24, 24] });
+      }, 1000);
     });
   }
 
