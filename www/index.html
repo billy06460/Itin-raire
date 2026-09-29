@@ -252,7 +252,6 @@
     margin:0;
     border-radius:0;
     border:none;
-    background:#ff00ea; /* DIAGNOSTIC TEMPORAIRE : à retirer une fois le bug identifié */
   }
   body.nav-active header,
   body.nav-active #route-form,
@@ -699,7 +698,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     currentTileLayer.on('tileerror', () => {
       tileFailCount++;
       // Si trop de tuiles échouent, on bascule sur le fournisseur suivant
-      if (tileFailCount > 6 && tileProviderIndex < TILE_PROVIDERS.length - 1){
+      if (tileFailCount > 3 && tileProviderIndex < TILE_PROVIDERS.length - 1){
         tileProviderIndex++;
         loadTileProvider(tileProviderIndex);
       }
@@ -1506,6 +1505,23 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   function enterNav(){
     navActive = true;
     document.body.classList.add('nav-active');
+    // Le style inline est appliqué en plus de la classe CSS : sur certaines
+    // WebView, la règle "body.nav-active #map" en feuille de style externe
+    // n'est mystérieusement pas prise en compte. Le style inline, lui,
+    // gagne toujours face à n'importe quelle feuille de style, donc c'est
+    // la méthode la plus fiable pour garantir le plein écran.
+    const mapEl = document.getElementById('map');
+    mapEl.style.position = 'fixed';
+    mapEl.style.top = '0';
+    mapEl.style.left = '0';
+    mapEl.style.right = '0';
+    mapEl.style.bottom = '0';
+    mapEl.style.width = '100vw';
+    mapEl.style.height = '100vh';
+    mapEl.style.zIndex = '500';
+    mapEl.style.margin = '0';
+    mapEl.style.borderRadius = '0';
+    mapEl.style.border = 'none';
     requestWakeLock();
     // Verrou d'orientation best-effort (le verrou fiable est fait au niveau
     // de l'activité Android elle-même, voir AndroidManifest) : utile pour
@@ -1513,6 +1529,13 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     try {
       if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(() => {});
     } catch (e) {}
+    // On repart d'un fournisseur de tuiles propre (le premier de la liste) :
+    // si la petite carte était retombée sur un fournisseur dégradé en cours
+    // de route, le plein écran (qui doit charger beaucoup plus de tuiles
+    // d'un coup) repart ainsi sur de bonnes bases plutôt que d'hériter
+    // d'un état déjà fragilisé.
+    tileProviderIndex = 0;
+    loadTileProvider(0);
     // Le passage en plein écran change la taille du conteneur de la carte ;
     // Leaflet doit recalculer sa taille APRÈS que le navigateur ait
     // effectivement appliqué ce nouveau layout, sinon il continue à
@@ -1530,12 +1553,16 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       setTimeout(refreshMap, 150);
       setTimeout(refreshMap, 500);
       setTimeout(refreshMap, 1200);
+      setTimeout(refreshMap, 2500);
     });
   }
 
   function exitNav(){
     navActive = false;
     document.body.classList.remove('nav-active');
+    // On retire le style inline posé à l'entrée : la règle CSS de base
+    // #map{...} (petite carte du formulaire) reprend la main.
+    document.getElementById('map').style.cssText = '';
     releaseWakeLock();
     requestAnimationFrame(() => {
       map.invalidateSize();
