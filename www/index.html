@@ -21,6 +21,15 @@
     --teal:#5ec8d8;
     --red:#ef5b5b;
   }
+  body.light-theme{
+    --asphalt:#f3f4f6;
+    --panel:#ffffff;
+    --panel-2:#eef0f3;
+    --line:#dde1e6;
+    --text:#14161a;
+    --text-dim:#5b6270;
+    --amber-dim:#e0c98a;
+  }
   *{box-sizing:border-box;}
   html,body{height:100%;}
   body{
@@ -46,18 +55,32 @@
     padding:18px 18px 0;
     flex-shrink:0;
   }
+  .brand-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin:0 0 14px;
+  }
   .brand{
     display:flex;
     align-items:center;
     gap:8px;
     font-size:19px;
     font-weight:600;
-    margin:0 0 14px;
   }
   .brand .dot{
     width:10px;height:10px;border-radius:2px;
     background:var(--amber);
     transform:rotate(45deg);
+    flex-shrink:0;
+  }
+  .settings-btn{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:9px;
+    width:36px; height:36px;
+    font-size:16px;
+    cursor:pointer;
     flex-shrink:0;
   }
 
@@ -416,6 +439,110 @@
     cursor:pointer;
   }
   .toll-alert-call{ background:var(--panel-2); color:var(--text-dim); border:1px solid var(--line) !important; }
+
+  /* ---- Panneau de réglages ---- */
+  .settings-card{
+    width:100%;
+    max-width:520px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-top:3px solid var(--amber);
+    border-radius:18px 18px 0 0;
+    padding:20px 22px calc(24px + env(safe-area-inset-bottom,0px));
+    max-height:82vh;
+    overflow-y:auto;
+  }
+  .settings-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:6px;
+  }
+  .settings-head h3{ margin:0; font-size:18px; }
+  .settings-close{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    width:30px; height:30px;
+    border-radius:8px;
+    font-size:14px;
+    cursor:pointer;
+  }
+  .settings-section{
+    margin-top:18px;
+    padding-top:16px;
+    border-top:1px solid var(--line);
+  }
+  .settings-section:first-of-type{ border-top:none; margin-top:10px; padding-top:0; }
+  .settings-label{
+    margin:0 0 10px;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    color:var(--text-dim);
+    font-weight:700;
+  }
+  .settings-row-btns{ display:flex; gap:10px; }
+  .theme-btn{
+    flex:1;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:12px;
+    border-radius:10px;
+    font:inherit;
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
+  }
+  .theme-btn.active{
+    background:var(--amber);
+    border-color:var(--amber);
+    color:#1a1300;
+  }
+  .settings-color-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 0;
+    font-size:14px;
+    color:var(--text);
+  }
+  .settings-color-row input[type="color"]{
+    width:44px; height:32px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:none;
+    padding:0;
+    cursor:pointer;
+  }
+  .settings-reset-btn{
+    margin-top:6px;
+    background:none;
+    border:none;
+    color:var(--teal);
+    font:inherit;
+    font-size:12.5px;
+    text-decoration:underline;
+    cursor:pointer;
+    padding:0;
+  }
+  .settings-slider-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .settings-slider-row input[type="range"]{
+    flex:1;
+    accent-color:var(--amber);
+  }
+  .settings-slider-value{
+    min-width:52px;
+    text-align:right;
+    font-weight:700;
+    color:var(--amber);
+    font-size:15px;
+  }
   .toll-alert-call:not(:disabled){ background:#2d5c3f; color:#eafff0; }
   .toll-alert-ok{ background:var(--amber); color:#1a1300; }
 
@@ -534,6 +661,7 @@
     line-height:1.5;
   }
   footer.attrib a{color:#7c828d;}
+  .copyright-line{ margin-top:6px; opacity:.55; font-size:9.5px; }
 
   .spinner{
     display:inline-block;
@@ -555,7 +683,10 @@
 <div id="app">
 
   <header>
-    <div class="brand"><span class="dot"></span>Itinéraire &amp; Péages</div>
+    <div class="brand-row">
+      <div class="brand"><span class="dot"></span>Itinéraire &amp; Péages</div>
+      <button id="open-settings" type="button" class="settings-btn" title="Réglages">⚙️</button>
+    </div>
     <nav class="tabs">
       <button id="tab-route" class="active" type="button">Itinéraire</button>
       <button id="tab-tolls" type="button" disabled>Péages sur le trajet</button>
@@ -639,9 +770,49 @@
     </div>
   </div>
 
+  <!-- Panneau de réglages -->
+  <div id="settings-overlay" class="toll-alert-overlay">
+    <div class="settings-card">
+      <div class="settings-head">
+        <h3>⚙️ Réglages</h3>
+        <button id="settings-close" type="button" class="settings-close">✕</button>
+      </div>
+
+      <div class="settings-section">
+        <p class="settings-label">Apparence</p>
+        <div class="settings-row-btns">
+          <button type="button" id="theme-dark-btn" class="theme-btn">🌙 Sombre</button>
+          <button type="button" id="theme-light-btn" class="theme-btn">☀️ Clair</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <p class="settings-label">Couleurs</p>
+        <div class="settings-color-row">
+          <span>Couleur principale (accent)</span>
+          <input type="color" id="color-amber">
+        </div>
+        <div class="settings-color-row">
+          <span>Couleur itinéraire / infos</span>
+          <input type="color" id="color-teal">
+        </div>
+        <button type="button" id="colors-reset" class="settings-reset-btn">Réinitialiser les couleurs</button>
+      </div>
+
+      <div class="settings-section">
+        <p class="settings-label">Distance d'alerte péage</p>
+        <div class="settings-slider-row">
+          <input type="range" id="alert-distance-slider" min="5" max="10" step="1" value="10">
+          <span id="alert-distance-value" class="settings-slider-value">10 km</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <footer class="attrib">
     Géocodage : Nominatim / Photon · Itinéraire : OSRM · Carte : Leaflet.<br>
     Gares de péage : jeu de données officiel data.gouv.fr (réseau routier national concédé), embarqué hors ligne.
+    <div class="copyright-line">© RCZ / PREJ Marseille</div>
   </footer>
 
 </div>
@@ -733,6 +904,66 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('tab-tolls').classList.toggle('active', name === 'tolls');
     if (name === 'route') setTimeout(() => map.invalidateSize(), 50);
   }
+
+  // ---- Réglages (thème, couleurs, distance d'alerte) ----
+  const DEFAULT_SETTINGS = { theme: 'dark', amber: '#f5b301', teal: '#5ec8d8', alertKm: 10 };
+  let appSettings = Object.assign({}, DEFAULT_SETTINGS);
+  try {
+    const raw = localStorage.getItem('appSettings');
+    if (raw) appSettings = Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw));
+  } catch (e) { console.warn('Lecture réglages impossible', e); }
+
+  function saveSettings(){
+    try { localStorage.setItem('appSettings', JSON.stringify(appSettings)); }
+    catch (e) { console.warn('Sauvegarde réglages impossible', e); }
+  }
+
+  function applySettings(){
+    document.body.classList.toggle('light-theme', appSettings.theme === 'light');
+    document.documentElement.style.setProperty('--amber', appSettings.amber);
+    document.documentElement.style.setProperty('--teal', appSettings.teal);
+    ALERT_RADIUS_METERS = appSettings.alertKm * 1000;
+
+    $('theme-dark-btn').classList.toggle('active', appSettings.theme !== 'light');
+    $('theme-light-btn').classList.toggle('active', appSettings.theme === 'light');
+    $('color-amber').value = appSettings.amber;
+    $('color-teal').value = appSettings.teal;
+    $('alert-distance-slider').value = appSettings.alertKm;
+    $('alert-distance-value').textContent = appSettings.alertKm + ' km';
+
+    // Un changement de distance d'alerte doit reprendre effet sur les
+    // gares déjà "vues" pendant le trajet en cours (sans quoi une gare
+    // rapprochée par le nouveau réglage ne se déclencherait jamais si elle
+    // avait déjà été dépassée par l'ancien seuil, plus grand).
+    if (typeof tollStations !== 'undefined'){
+      tollStations.forEach(s => { if (!s.passed) s.alerted = false; });
+    }
+  }
+
+  $('open-settings').addEventListener('click', () => {
+    $('settings-overlay').classList.add('show');
+  });
+  $('settings-close').addEventListener('click', () => {
+    $('settings-overlay').classList.remove('show');
+  });
+
+  $('theme-dark-btn').addEventListener('click', () => { appSettings.theme = 'dark'; saveSettings(); applySettings(); });
+  $('theme-light-btn').addEventListener('click', () => { appSettings.theme = 'light'; saveSettings(); applySettings(); });
+
+  $('color-amber').addEventListener('input', (e) => { appSettings.amber = e.target.value; saveSettings(); applySettings(); });
+  $('color-teal').addEventListener('input', (e) => { appSettings.teal = e.target.value; saveSettings(); applySettings(); });
+  $('colors-reset').addEventListener('click', () => {
+    appSettings.amber = DEFAULT_SETTINGS.amber;
+    appSettings.teal = DEFAULT_SETTINGS.teal;
+    saveSettings();
+    applySettings();
+  });
+
+  $('alert-distance-slider').addEventListener('input', (e) => {
+    appSettings.alertKm = parseInt(e.target.value, 10);
+    $('alert-distance-value').textContent = appSettings.alertKm + ' km';
+  });
+  $('alert-distance-slider').addEventListener('change', () => { saveSettings(); applySettings(); });
 
   $('tab-route').addEventListener('click', () => showView('route'));
   $('tab-tolls').addEventListener('click', () => { if (!$('tab-tolls').disabled) showView('tolls'); });
@@ -1262,7 +1493,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     renderPendingTollBar();
   }
 
-  const ALERT_RADIUS_METERS = 10000; // 10 km
+  let ALERT_RADIUS_METERS = 10000; // 10 km par défaut, réglable dans les paramètres (5-10 km)
   const PASSED_RADIUS_METERS = 300;  // en-dessous, on considère le péage franchi (physiquement)
   const OFF_ROUTE_METERS = 1200;     // au-delà, on considère qu'on s'est écarté du tracé calculé
   let watchId = null;
@@ -1687,6 +1918,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     if (watchId === null){ startTracking(); enterNav(); }
     else { stopTracking(); exitNav(); }
   });
+
+  // Applique le thème/couleurs/distance d'alerte sauvegardés, une fois que
+  // toutes les variables et fonctions nécessaires sont bien déclarées.
+  applySettings();
 
   // Au chargement de l'app, propose de reprendre un trajet resté en cours
   // (app réduite ou fermée pendant un suivi actif).
