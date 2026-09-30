@@ -1345,10 +1345,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       // Filtre bretelle + tronçon OSM : uniquement pour les péages de type
       // échangeur/tunnel urbain, et seulement dans la zone ambiguë
       // (au-delà de 35 m — un point quasiment sur la voie principale,
-      // comme Peyruis, reste toujours gardé). Logique "OU" entre les deux
-      // signaux : si l'un des deux confirme un vrai passage payant, on
-      // garde la gare ; on ne l'exclut que si AUCUN des deux signaux
-      // disponibles ne la confirme.
+      // comme Peyruis, reste toujours gardé). Logique "ET" entre les deux
+      // signaux quand les deux sont disponibles : il faut que les deux
+      // confirment un vrai passage payant (plus strict, moins de faux
+      // positifs dans les zones urbaines à échangeurs denses). Si un seul
+      // des deux signaux est disponible (l'autre a échoué/n'a rien
+      // renvoyé), on se contente de celui-là.
       if ((t.type === 'Ech' || t.type === 'Urb') && best > 35){
         const rampDist = nearestRampDist(t.lat, t.lon, tollKm);
         const wayDist = nearestTolledWayDist(t.lat, t.lon);
@@ -1356,9 +1358,14 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         const wayConfirms = wayDist !== null && wayDist <= TOLLED_WAY_PROXIMITY_METERS;
         const rampChecked = rampPoints && rampPoints.length;
         const wayChecked = tolledWayPoints && tolledWayPoints.length;
-        // On ne rejette que si au moins un signal était disponible et
-        // qu'aucun des signaux disponibles ne confirme le passage payant.
-        if ((rampChecked || wayChecked) && !rampConfirms && !wayConfirms) return;
+
+        let keep;
+        if (rampChecked && wayChecked) keep = rampConfirms && wayConfirms;
+        else if (rampChecked) keep = rampConfirms;
+        else if (wayChecked) keep = wayConfirms;
+        else keep = true; // aucune donnée de vérification disponible : pas de filtrage possible
+
+        if (!keep) return;
       }
 
       matches.push({
