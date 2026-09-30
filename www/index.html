@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Itinéraire &amp; Péages</title>
-<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -676,7 +675,7 @@
   }
   @keyframes spin{to{transform:rotate(360deg);}}
 
-  .mapboxgl-canvas{background:#20232a;}
+  #map{ background:#20232a; }
 </style>
 </head>
 <body>
@@ -811,14 +810,14 @@
   </div>
 
   <footer class="attrib">
-    Géocodage : Nominatim / Photon · Itinéraire : OSRM · Carte : Mapbox.<br>
+    Géocodage : Google / Nominatim · Itinéraire : Google / OSRM · Carte : Google Maps.<br>
     Gares de péage : jeu de données officiel data.gouv.fr (réseau routier national concédé), embarqué hors ligne.
     <div class="copyright-line">© RCZ / PREJ Marseille</div>
   </footer>
 
 </div>
 
-<script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCzKzeKgCcvPblIIpgPW4wBe9XsvCilMKQ"></script>
 <script>
 /* Jeu de données officiel des gares de péage (source : gares-peage-2025.csv,
    data.gouv.fr - "Gares de péage du réseau routier national concédé").
@@ -844,40 +843,27 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   const $ = (id) => document.getElementById(id);
 
   // ---------------------------------------------------------------------
-  // ⚠️ À REMPLIR : colle ton token d'accès Mapbox ici (gratuit, sans carte
-  // bancaire, sur https://account.mapbox.com/ après création d'un compte).
-  // Sans token valide, la carte ne s'affichera pas.
+  // Clé API Google (Maps JavaScript API + Geocoding API + Routes API
+  // doivent être activées sur ce projet Google Cloud).
   // ---------------------------------------------------------------------
-  mapboxgl.accessToken = 'pk.eyJ1IjoiYmlsbHkxMzQwMCIsImEiOiJjbXVucHhnczEwMDNzMnhzY2Jmb2theDNpIn0.SWdHSEMG0qEvK5F42wTiFg';
+  const GOOGLE_API_KEY = 'AIzaSyCzKzeKgCcvPblIIpgPW4wBe9XsvCilMKQ';
 
   // Petit utilitaire : nos données internes utilisent systématiquement
-  // l'ordre [lat, lon] (comme Leaflet et comme les coordonnées GPS
-  // usuelles), alors que Mapbox attend [lon, lat] partout dans son API.
-  // On ne convertit qu'au moment de parler à Mapbox, jamais ailleurs.
-  const toLngLat = (latLon) => [latLon[1], latLon[0]];
+  // l'ordre [lat, lon], alors que Google Maps attend des objets {lat,lng}.
+  // On ne convertit qu'au moment de parler à Google Maps, jamais ailleurs.
+  const toLatLng = (latLon) => ({ lat: latLon[0], lng: latLon[1] });
 
-  let map = new mapboxgl.Map({
-    container: 'map',
-    style: 'mapbox://styles/mapbox/streets-v12',
-    center: toLngLat([46.6, 2.4]),
-    zoom: 5
+  let map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 46.6, lng: 2.4 },
+    zoom: 5,
+    disableDefaultUI: true,
+    zoomControl: true,
+    gestureHandling: 'greedy'
   });
-  map.addControl(new mapboxgl.NavigationControl(), 'top-left');
 
-  // La carte doit finir de charger son style avant qu'on puisse ajouter
-  // des sources/calques (tracé, marqueurs) ; ce petit gestionnaire permet
-  // d'attendre ce moment si besoin (utile aussi après une recréation de
-  // la carte, voir recreateMap()).
-  let mapLoaded = false;
-  map.on('load', () => { mapLoaded = true; });
-  function whenMapReady(fn){
-    if (mapLoaded) fn();
-    else map.once('load', fn);
-  }
-
-  let routeLine = null;   // simple indicateur (vrai/faux) : la source/calque Mapbox s'appelle 'route-line'
-  let endMarkers = [];    // tableau d'instances mapboxgl.Marker (départ/arrivée)
-  let tollMarkers = [];   // tableau d'instances mapboxgl.Marker (péages)
+  let routeLine = null;   // instance google.maps.Polyline
+  let endMarkers = [];    // tableau d'instances google.maps.Marker (départ/arrivée)
+  let tollMarkers = [];   // tableau d'instances google.maps.Marker (péages)
   let routeCoords = [];   // [[lat,lon], ...]
   let tollStations = [];  // résultats affichés écran 2
   let lastDep = null, lastArr = null, lastRoute = null;
@@ -889,7 +875,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   let depOverride = null; // {lat, lon, label} si "ma position actuelle" est utilisée comme départ
 
   function clearMarkerArray(arr){
-    arr.forEach(m => m.remove());
+    arr.forEach(m => m.setMap(null));
     arr.length = 0;
   }
 
@@ -904,7 +890,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('view-tolls').classList.toggle('active', name === 'tolls');
     $('tab-route').classList.toggle('active', name === 'route');
     $('tab-tolls').classList.toggle('active', name === 'tolls');
-    if (name === 'route') setTimeout(() => map.resize(), 50);
+    if (name === 'route') setTimeout(() => google.maps.event.trigger(map, 'resize'), 50);
   }
 
   // ---- Réglages (thème, couleurs, distance d'alerte) ----
@@ -993,12 +979,17 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         const { latitude, longitude } = pos.coords;
         let label = 'Ma position actuelle';
         try {
-          const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=fr`;
-          const res = await fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000);
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&language=fr&key=${GOOGLE_API_KEY}`;
+          const res = await fetchWithTimeout(url, {}, 8000);
           if (res.ok){
             const data = await res.json();
-            const a = data && data.address;
-            if (a) label = a.city || a.town || a.village || a.municipality || a.county || label;
+            if (data.status === 'OK' && data.results && data.results.length){
+              const comp = data.results[0].address_components;
+              const cityComp = comp.find(c => c.types.includes('locality'))
+                || comp.find(c => c.types.includes('postal_town'))
+                || comp[0];
+              if (cityComp) label = cityComp.long_name;
+            }
           }
         } catch (e) { console.warn('Géocodage inverse indisponible', e); }
 
@@ -1083,7 +1074,26 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     }
   }
 
+  async function geocodeViaGoogle(query){
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&region=fr&language=fr&key=${GOOGLE_API_KEY}`;
+    const res = await fetchWithTimeout(url, {}, 8000);
+    if (!res.ok) throw new Error('google_geocode_http_' + res.status);
+    const data = await res.json();
+    if (data.status !== 'OK' || !data.results || !data.results.length) return null;
+    const r = data.results[0];
+    const cityComp = r.address_components.find(c => c.types.includes('locality'))
+      || r.address_components.find(c => c.types.includes('postal_town'))
+      || r.address_components[0];
+    return {
+      lat: r.geometry.location.lat,
+      lon: r.geometry.location.lng,
+      label: (cityComp && cityComp.long_name) || r.formatted_address.split(',')[0]
+    };
+  }
+
   async function geocodeViaNominatim(query){
+    // Repli si Google échoue (réseau, quota...) : Nominatim, gratuit et
+    // sans clé, basé sur OpenStreetMap.
     const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&accept-language=fr&countrycodes=fr&q=' + encodeURIComponent(query);
     const res = await fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000);
     if (!res.ok) throw new Error('nominatim_http_' + res.status);
@@ -1092,31 +1102,14 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), label: data[0].display_name.split(',')[0] };
   }
 
-  async function geocodeViaPhoton(query){
-    // Géocodeur de secours (Komoot Photon), gratuit, sans clé, basé lui
-    // aussi sur les données OpenStreetMap.
-    const url = 'https://photon.komoot.io/api/?limit=1&lang=fr&q=' + encodeURIComponent(query + ', France');
-    const res = await fetchWithTimeout(url, {}, 8000);
-    if (!res.ok) throw new Error('photon_http_' + res.status);
-    const data = await res.json();
-    const f = data.features && data.features[0];
-    if (!f) return null;
-    const props = f.properties || {};
-    return {
-      lat: f.geometry.coordinates[1],
-      lon: f.geometry.coordinates[0],
-      label: props.name || props.city || query
-    };
-  }
-
   async function geocode(query){
     let networkFailures = 0;
     try {
-      const r = await geocodeViaNominatim(query);
+      const r = await geocodeViaGoogle(query);
       if (r) return r;
     } catch (e) { networkFailures++; }
     try {
-      const r = await geocodeViaPhoton(query);
+      const r = await geocodeViaNominatim(query);
       if (r) return r;
     } catch (e) { networkFailures++; }
     if (networkFailures >= 2){
@@ -1125,7 +1118,11 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     throw new Error('Ville introuvable : « ' + query + ' ».');
   }
 
-  async function routeBetween(a, b){
+  // Calcul d'itinéraire via OSRM (serveur de démo public) : conservé
+  // spécifiquement pour les manœuvres (sorties, bretelles) et les
+  // références de route, dont dépend toute la précision de détection des
+  // péages. Utilisé aussi en repli complet si le service IGN échoue.
+  async function routeBetweenOSRM(a, b){
     let res;
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson&steps=true`;
@@ -1145,12 +1142,22 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     // principale.
     const RAMP_MANEUVERS = new Set(['on ramp', 'off ramp', 'fork', 'exit roundabout', 'exit rotary', 'roundabout']);
     const rampPoints = [];
+    // Référence de route (A9, A709, A61...) réellement empruntée à chaque
+    // étape du trajet, avec sa position en km. Sert à détecter les cas où
+    // deux autoroutes parallèles très proches (ex: A9 historique et son
+    // contournement A709 près de Montpellier) pourraient faire confondre
+    // la barrière de l'une avec le tracé de l'autre.
+    const roadRefs = [];
     let runningDistance = 0;
     (r.legs || []).forEach(leg => {
       (leg.steps || []).forEach(step => {
         const m = step.maneuver;
         if (m && RAMP_MANEUVERS.has(m.type) && Array.isArray(m.location)){
           rampPoints.push([m.location[1], m.location[0], runningDistance / 1000]); // [lat, lon, km]
+        }
+        const ref = step.ref || (typeof step.name === 'string' && /^A ?\d+/.test(step.name) ? step.name : null);
+        if (ref){
+          roadRefs.push({ km: runningDistance / 1000, ref: ref.replace(/\s+/g, '').toUpperCase() });
         }
         runningDistance += step.distance || 0;
       });
@@ -1160,8 +1167,78 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       coords: r.geometry.coordinates.map(c => [c[1], c[0]]),
       distance: r.distance,
       duration: r.duration,
-      rampPoints
+      rampPoints,
+      roadRefs
     };
+  }
+
+  // Calcul d'itinéraire via l'API Google Routes v2 : tracé principal
+  // affiché (distance/durée/géométrie), plus une estimation native du
+  // coût des péages sur le trajet (bonus). Ne fournit pas de détail
+  // manœuvre par manœuvre exploitable de la même façon qu'OSRM pour notre
+  // filtre bretelle, donc combiné avec les données OSRM ci-dessus pour
+  // cette partie-là.
+  async function routeBetweenGoogle(a, b){
+    const url = `https://routes.googleapis.com/directions/v2:computeRoutes?key=${GOOGLE_API_KEY}`;
+    const body = {
+      origin: { location: { latLng: { latitude: a.lat, longitude: a.lon } } },
+      destination: { location: { latLng: { latitude: b.lat, longitude: b.lon } } },
+      travelMode: 'DRIVE',
+      routingPreference: 'TRAFFIC_UNAWARE',
+      computeAlternativeRoutes: false,
+      extraComputations: ['TOLLS'],
+      languageCode: 'fr-FR',
+      units: 'METRIC',
+      polylineEncoding: 'GEO_JSON_LINESTRING'
+    };
+    let res;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.geoJsonLinestring,routes.travelAdvisory.tollInfo'
+        },
+        body: JSON.stringify(body)
+      }, 12000);
+    } catch (e) { return null; }
+    if (!res.ok) return null;
+    const data = await res.json();
+    const route = data.routes && data.routes[0];
+    if (!route) return null;
+    const geometry = route.polyline && route.polyline.geoJsonLinestring;
+    if (!geometry || !Array.isArray(geometry.coordinates) || geometry.coordinates.length < 2) return null;
+
+    return {
+      coords: geometry.coordinates.map(c => [c[1], c[0]]),
+      distance: route.distanceMeters,
+      duration: parseFloat(String(route.duration || '0s').replace('s', '')),
+      tollInfo: (route.travelAdvisory && route.travelAdvisory.tollInfo) || null
+    };
+  }
+
+  async function routeBetween(a, b){
+    // Les manœuvres/références de route (précision des péages) viennent
+    // toujours d'OSRM. On tente en plus Google Routes pour un tracé
+    // principal plus fiable, avec en bonus une estimation du coût des
+    // péages ; en cas d'échec ou de réponse inattendue, on garde
+    // simplement le tracé OSRM déjà obtenu (aucune interruption pour
+    // l'utilisateur).
+    const osrmResult = await routeBetweenOSRM(a, b);
+    try {
+      const googleResult = await routeBetweenGoogle(a, b);
+      if (googleResult){
+        return Object.assign({}, osrmResult, {
+          coords: googleResult.coords,
+          distance: googleResult.distance,
+          duration: googleResult.duration,
+          tollInfo: googleResult.tollInfo
+        });
+      }
+    } catch (e) {
+      console.warn('Google Routes indisponible, tracé OSRM conservé', e);
+    }
+    return osrmResult;
   }
 
   // ---- Tronçons OpenStreetMap tagués "à péage" (toll=yes) ----
@@ -1286,7 +1363,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // (seuil serré, pour ne pas attraper une sortie voisine non empruntée),
   // un tunnel urbain a un seuil intermédiaire (accès moins précisément
   // repéré que les gares officielles).
-  function findTollsOnRoute(coords, thresholds, rampPoints, tolledWayPoints){
+  function findTollsOnRoute(coords, thresholds, rampPoints, tolledWayPoints, roadRefs){
     thresholds = thresholds || { Bpv: 250, Ech: 250, Urb: 200 };
     const maxPossible = Math.max(thresholds.Bpv, thresholds.Ech, thresholds.Urb || 200);
     const coarse = sampleRoute(coords, 50); // points de recherche rapprochés pour un filtrage précis
@@ -1326,6 +1403,21 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       return best;
     }
 
+    // Référence de route (A9, A709...) réellement empruntée le plus près de
+    // cette position sur le trajet : permet de repérer une confusion entre
+    // deux autoroutes parallèles très proches (ex: A9 historique et son
+    // contournement A709 près de Montpellier), où une barrière de l'une
+    // resterait à tort sous le seuil de distance au tracé de l'autre.
+    function nearestRoadRef(tollKm){
+      if (!roadRefs || !roadRefs.length) return null;
+      let best = null, bestDist = Infinity;
+      for (let i = 0; i < roadRefs.length; i++){
+        const d = Math.abs(roadRefs[i].km - tollKm);
+        if (d < bestDist){ bestDist = d; best = roadRefs[i].ref; }
+      }
+      return bestDist <= 1.5 ? best : null; // seulement si vraiment proche en position sur le trajet
+    }
+
     TOLLS.forEach(t => {
       if (hiddenTollNames.has(t.name)) return; // masqué manuellement par l'utilisateur
       const limit = thresholds[t.type] !== undefined ? thresholds[t.type] : maxPossible;
@@ -1341,6 +1433,19 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
       const { idx } = nearestIndexOnRoute(t.lat, t.lon, coords);
       const tollKm = cum[idx] / 1000;
+
+      // Vérification de la route réellement empruntée (toutes les gares à
+      // code de route "propre", ex: A9, A709 — pas les codes bruts type
+      // "13A905420CD" utilisés pour les échangeurs). Corrige la confusion
+      // entre deux autoroutes parallèles très proches (ex: Baillargues sur
+      // l'A709, à tort détectée quand le trajet passe en réalité par l'A9).
+      if (/^A\d+$/.test(t.route)){
+        const actualRef = nearestRoadRef(tollKm);
+        if (actualRef){
+          const actualRefs = actualRef.split(/[;/]/);
+          if (!actualRefs.includes(t.route)) return;
+        }
+      }
 
       // Filtre bretelle + tronçon OSM : uniquement pour les péages de type
       // échangeur/tunnel urbain, et seulement dans la zone ambiguë
@@ -1394,61 +1499,42 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   // ---- Rendu carte / résumé ----
   function computeBounds(coordsLatLon){
-    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-    coordsLatLon.forEach(([lat, lon]) => {
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-      if (lon < minLon) minLon = lon;
-      if (lon > maxLon) maxLon = lon;
-    });
-    return [[minLon, minLat], [maxLon, maxLat]]; // format Mapbox : [[lon,lat],[lon,lat]]
-  }
-
-  function makeDotMarker(color){
-    const el = document.createElement('div');
-    el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${color};border:3px solid #14161a;`;
-    return el;
+    const bounds = new google.maps.LatLngBounds();
+    coordsLatLon.forEach(([lat, lon]) => bounds.extend({ lat, lng: lon }));
+    return bounds;
   }
 
   function drawRoute(dep, arr, route){
     clearMarkerArray(endMarkers);
     clearMarkerArray(tollMarkers);
 
-    whenMapReady(() => {
-      const lineData = {
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: route.coords.map(toLngLat) }
-      };
-      const src = map.getSource('route-line');
-      if (src){
-        src.setData(lineData);
-      } else {
-        map.addSource('route-line', { type: 'geojson', data: lineData });
-        map.addLayer({
-          id: 'route-line-layer',
-          type: 'line',
-          source: 'route-line',
-          layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#5ec8d8', 'line-width': 5, 'line-opacity': .9 }
-        });
-      }
-      routeLine = true;
+    const path = route.coords.map(toLatLng);
+    if (routeLine){
+      routeLine.setPath(path);
+    } else {
+      routeLine = new google.maps.Polyline({
+        path,
+        map,
+        strokeColor: '#5ec8d8',
+        strokeWeight: 5,
+        strokeOpacity: .9
+      });
+    }
 
-      endMarkers.push(
-        new mapboxgl.Marker({ element: makeDotMarker('#5ec8d8') })
-          .setLngLat(toLngLat(route.coords[0]))
-          .setPopup(new mapboxgl.Popup().setText(dep.label))
-          .addTo(map)
-      );
-      endMarkers.push(
-        new mapboxgl.Marker({ element: makeDotMarker('#f5b301') })
-          .setLngLat(toLngLat(route.coords[route.coords.length - 1]))
-          .setPopup(new mapboxgl.Popup().setText(arr.label))
-          .addTo(map)
-      );
+    endMarkers.push(new google.maps.Marker({
+      position: toLatLng(route.coords[0]),
+      map,
+      title: dep.label,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: '#5ec8d8', fillOpacity: 1, strokeColor: '#14161a', strokeWeight: 3 }
+    }));
+    endMarkers.push(new google.maps.Marker({
+      position: toLatLng(route.coords[route.coords.length - 1]),
+      map,
+      title: arr.label,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: '#f5b301', fillOpacity: 1, strokeColor: '#14161a', strokeWeight: 3 }
+    }));
 
-      map.fitBounds(computeBounds(route.coords), { padding: 24 });
-    });
+    map.fitBounds(computeBounds(route.coords), 24);
 
     $('summary').classList.add('show');
     $('sum-dist').textContent = (route.distance / 1000).toFixed(0) + ' km';
@@ -1457,20 +1543,18 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   function drawTollMarkers(){
     clearMarkerArray(tollMarkers);
-    whenMapReady(() => {
-      tollStations.forEach((s, i) => {
-        const bg = s.called ? '#2d9d5c' : '#ef5b5b';
-        const el = document.createElement('div');
-        el.style.cssText = `background:${bg};color:#fff;font:700 10px 'Space Grotesk';width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;border:2px solid #14161a;`;
-        el.textContent = String(i + 1);
-        const popupHtml = `<b>${escapeHtml(s.name)}</b>${s.network ? '<br>' + escapeHtml(s.network) : ''}<br>${s.called ? '✅ Appelé' : '🔴 Pas encore appelé'}`;
-        tollMarkers.push(
-          new mapboxgl.Marker({ element: el })
-            .setLngLat(toLngLat([s.lat, s.lon]))
-            .setPopup(new mapboxgl.Popup().setHTML(popupHtml))
-            .addTo(map)
-        );
+    tollStations.forEach((s, i) => {
+      const bg = s.called ? '#2d9d5c' : '#ef5b5b';
+      const marker = new google.maps.Marker({
+        position: { lat: s.lat, lng: s.lon },
+        map,
+        label: { text: String(i + 1), color: '#fff', fontWeight: '700', fontSize: '11px' },
+        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 11, fillColor: bg, fillOpacity: 1, strokeColor: '#14161a', strokeWeight: 2 }
       });
+      const popupHtml = `<div style="color:#14161a"><b>${escapeHtml(s.name)}</b>${s.network ? '<br>' + escapeHtml(s.network) : ''}<br>${s.called ? '✅ Appelé' : '🔴 Pas encore appelé'}</div>`;
+      const infoWindow = new google.maps.InfoWindow({ content: popupHtml });
+      marker.addListener('click', () => infoWindow.open({ anchor: marker, map }));
+      tollMarkers.push(marker);
     });
   }
 
@@ -1516,7 +1600,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       });
       card.addEventListener('click', () => {
         showView('route');
-        map.jumpTo({ center: toLngLat([s.lat, s.lon]), zoom: 13 });
+        map.setCenter({ lat: s.lat, lng: s.lon });
+        map.setZoom(13);
       });
       list.appendChild(card);
     });
@@ -1544,7 +1629,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     // s'il échoue ou est indisponible, la recherche continue quand même.
     const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
     route.tolledWayPoints = tolledWayPoints;
-    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints);
+    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
     // circulation est toujours "vers la destination" puisque seuls les
@@ -1635,7 +1720,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length){
-        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute && lastRoute.rampPoints, lastRoute && lastRoute.tolledWayPoints);
+        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute && lastRoute.rampPoints, lastRoute && lastRoute.tolledWayPoints, lastRoute && lastRoute.roadRefs);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -1773,7 +1858,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       const previous = tollStations;
       const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
       route.tolledWayPoints = tolledWayPoints;
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints);
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
         s.alerted = prev ? prev.alerted : false;
@@ -1839,11 +1924,21 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // ---- Marqueur de position live ----
   function ensureLiveMarker(lat, lon){
     if (!liveMarker){
-      const el = document.createElement('div');
-      el.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#5ec8d8;border:3px solid #fff;box-shadow:0 0 0 4px rgba(94,200,216,.35);';
-      liveMarker = new mapboxgl.Marker({ element: el }).setLngLat(toLngLat([lat, lon])).addTo(map);
+      liveMarker = new google.maps.Marker({
+        position: { lat, lng: lon },
+        map,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 9,
+          fillColor: '#5ec8d8',
+          fillOpacity: 1,
+          strokeColor: '#fff',
+          strokeWeight: 3
+        },
+        zIndex: 1000
+      });
     } else {
-      liveMarker.setLngLat(toLngLat([lat, lon]));
+      liveMarker.setPosition({ lat, lng: lon });
     }
   }
 
@@ -1953,11 +2048,15 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(() => {});
     } catch (e) {}
     // Le passage en plein écran change la taille du conteneur de la carte ;
-    // Mapbox doit recalculer sa taille APRÈS que le navigateur ait
-    // effectivement appliqué ce nouveau layout, sinon la carte garde
+    // Google Maps doit être informé du changement APRÈS que le navigateur
+    // ait effectivement appliqué ce nouveau layout, sinon la carte garde
     // l'ancienne (petite) taille. On relance donc resize() à plusieurs
     // reprises pour couvrir les cas où le premier recalcul est trop tôt.
-    const refreshMap = () => map.resize();
+    const center = map.getCenter();
+    const refreshMap = () => {
+      google.maps.event.trigger(map, 'resize');
+      if (center) map.setCenter(center);
+    };
     requestAnimationFrame(() => {
       refreshMap();
       map.setZoom(16);
@@ -1967,24 +2066,23 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     });
   }
 
-  // Recrée entièrement la carte Mapbox (au lieu de tenter de redimensionner
-  // la même instance) : certaines WebView gardent un affichage figé/mal
-  // positionné après un aller-retour petite carte <-> plein écran, quoi que
-  // l'on essaie côté resize(). Détruire puis reconstruire la carte de zéro
-  // élimine ce risque, au prix d'un bref rechargement du tracé et des
+  // Recrée entièrement la carte Google Maps (au lieu de tenter de
+  // redimensionner la même instance) : certaines WebView gardent un
+  // affichage figé/mal positionné après un aller-retour petite carte <->
+  // plein écran, quoi que l'on essaie côté resize(). Recréer la carte de
+  // zéro élimine ce risque, au prix d'un bref rechargement du tracé et des
   // marqueurs.
   function recreateMap(){
-    try { map.remove(); } catch (e) { console.warn('Suppression carte impossible', e); }
+    const mapEl = document.getElementById('map');
+    mapEl.innerHTML = '';
 
-    mapLoaded = false;
-    map = new mapboxgl.Map({
-      container: 'map',
-      style: 'mapbox://styles/mapbox/streets-v12',
-      center: toLngLat([46.6, 2.4]),
-      zoom: 5
+    map = new google.maps.Map(mapEl, {
+      center: { lat: 46.6, lng: 2.4 },
+      zoom: 5,
+      disableDefaultUI: true,
+      zoomControl: true,
+      gestureHandling: 'greedy'
     });
-    map.addControl(new mapboxgl.NavigationControl(), 'top-left');
-    map.on('load', () => { mapLoaded = true; });
 
     endMarkers = [];
     tollMarkers = [];
@@ -2008,7 +2106,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   // Filet de sécurité supplémentaire : si la fenêtre change de taille
   // (rotation, clavier, barres système) pendant le trajet, on recalcule.
-  window.addEventListener('resize', () => { if (navActive) map.resize(); });
+  window.addEventListener('resize', () => { if (navActive) google.maps.event.trigger(map, 'resize'); });
 
   $('nav-quit').addEventListener('click', () => { stopTracking(); exitNav(); });
 
@@ -2087,7 +2185,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       checkProximity(latitude, longitude);
       ensureLiveMarker(latitude, longitude);
       if (navActive){
-        map.setView([latitude, longitude], map.getZoom(), { animate: true });
+        map.panTo({ lat: latitude, lng: longitude });
         updateNavBar(latitude, longitude);
       }
     };
