@@ -1163,6 +1163,39 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     };
   }
 
+  // ---- Tronçons OpenStreetMap tagués "à péage" (toll=yes) ----
+  // Signal complémentaire aux manœuvres OSRM : MapUp (l'éditeur de
+  // TollGuru) contribue activement à OpenStreetMap pour marquer les
+  // TRONÇONS de route réellement payants (pas juste des points de gare).
+  // On vérifie donc, en plus de la distance et des manœuvres, si le
+  // trajet passe bien par un tronçon tagué "toll=yes" à cet endroit —
+  // un signal plus direct que "il y a une gare à proximité".
+  async function fetchTolledWaySegments(routeCoords){
+    try {
+      const samples = sampleRoute(routeCoords, 300); // échantillonnage plus large : juste pour cadrer la zone de recherche
+      const centers = samples.map(p => p[0] + ',' + p[1]).join(',');
+      const query =
+        '[out:json][timeout:25];' +
+        `way(around:80,${centers})["toll"="yes"];` +
+        'out geom;';
+      const res = await fetchWithTimeout('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(query)
+      }, 20000);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const points = [];
+      (data.elements || []).forEach(el => {
+        (el.geometry || []).forEach(pt => points.push([pt.lat, pt.lon]));
+      });
+      return points;
+    } catch (e) {
+      console.warn('Récupération des tronçons à péage OSM impossible (non bloquant)', e);
+      return []; // en cas d'échec, on continue simplement sans ce signal supplémentaire
+    }
+  }
+
   // ---- Jeu de données officiel des gares de péage ----
   // TOLLS_RAW (chargé depuis tolls-data.js, embarqué juste avant ce
   // script) provient du fichier fourni par l'utilisateur :
@@ -1252,7 +1285,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // (seuil serré, pour ne pas attraper une sortie voisine non empruntée),
   // un tunnel urbain a un seuil intermédiaire (accès moins précisément
   // repéré que les gares officielles).
-  function findTollsOnRoute(coords, thresholds, rampPoints){
+  function findTollsOnRoute(coords, thresholds, rampPoints, tolledWayPoints){
     thresholds = thresholds || { Bpv: 250, Ech: 250, Urb: 200 };
     const maxPossible = Math.max(thresholds.Bpv, thresholds.Ech, thresholds.Urb || 200);
     const coarse = sampleRoute(coords, 50); // points de recherche rapprochés pour un filtrage précis
@@ -1277,6 +1310,21 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       return best;
     }
 
+    // Distance jusqu'au tronçon OpenStreetMap tagué "toll=yes" le plus
+    // proche : deuxième signal indépendant, basé sur les contributions
+    // OSM de MapUp (l'éditeur de TollGuru) plutôt que sur les manœuvres
+    // OSRM.
+    const TOLLED_WAY_PROXIMITY_METERS = 80;
+    function nearestTolledWayDist(lat, lon){
+      if (!tolledWayPoints || !tolledWayPoints.length) return null;
+      let best = Infinity;
+      for (let i = 0; i < tolledWayPoints.length; i++){
+        const d = haversine(lat, lon, tolledWayPoints[i][0], tolledWayPoints[i][1]);
+        if (d < best) best = d;
+      }
+      return best;
+    }
+
     TOLLS.forEach(t => {
       if (hiddenTollNames.has(t.name)) return; // masqué manuellement par l'utilisateur
       const limit = thresholds[t.type] !== undefined ? thresholds[t.type] : maxPossible;
@@ -1293,16 +1341,23 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       const { idx } = nearestIndexOnRoute(t.lat, t.lon, coords);
       const tollKm = cum[idx] / 1000;
 
-      // Filtre bretelle : uniquement pour les péages de type échangeur/
-      // tunnel urbain, seulement si on a bien reçu des manœuvres pour ce
-      // trajet, et seulement dans la zone ambiguë (au-delà de 35 m) : un
-      // point quasiment sur la voie principale est du signal fort qu'il
-      // s'agit d'une vraie barrière traversée par tous (comme Peyruis,
-      // typée "échangeur" dans le fichier officiel mais bien payée par le
-      // trafic de passage) — on ne le filtre donc jamais dans ce cas.
-      if ((t.type === 'Ech' || t.type === 'Urb') && rampPoints && rampPoints.length && best > 35){
+      // Filtre bretelle + tronçon OSM : uniquement pour les péages de type
+      // échangeur/tunnel urbain, et seulement dans la zone ambiguë
+      // (au-delà de 35 m — un point quasiment sur la voie principale,
+      // comme Peyruis, reste toujours gardé). Logique "OU" entre les deux
+      // signaux : si l'un des deux confirme un vrai passage payant, on
+      // garde la gare ; on ne l'exclut que si AUCUN des deux signaux
+      // disponibles ne la confirme.
+      if ((t.type === 'Ech' || t.type === 'Urb') && best > 35){
         const rampDist = nearestRampDist(t.lat, t.lon, tollKm);
-        if (rampDist !== null && rampDist > RAMP_PROXIMITY_METERS) return;
+        const wayDist = nearestTolledWayDist(t.lat, t.lon);
+        const rampConfirms = rampDist !== null && rampDist <= RAMP_PROXIMITY_METERS;
+        const wayConfirms = wayDist !== null && wayDist <= TOLLED_WAY_PROXIMITY_METERS;
+        const rampChecked = rampPoints && rampPoints.length;
+        const wayChecked = tolledWayPoints && tolledWayPoints.length;
+        // On ne rejette que si au moins un signal était disponible et
+        // qu'aucun des signaux disponibles ne confirme le passage payant.
+        if ((rampChecked || wayChecked) && !rampConfirms && !wayConfirms) return;
       }
 
       matches.push({
@@ -1426,8 +1481,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     setStatus('Recherche des gares de péage sur le trajet…', false, true);
     // Recherche 100% locale (jeu de données officiel embarqué) : ne
     // dépend d'aucun appel réseau, donc fonctionne même hors ligne
-    // et n'est jamais bloquée par une restriction WebView/CORS.
-    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints);
+    // et n'est jamais bloquée par une restriction WebView/CORS. Le signal
+    // OSM (tronçons "toll=yes") est un complément optionnel, en réseau :
+    // s'il échoue ou est indisponible, la recherche continue quand même.
+    const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
+    route.tolledWayPoints = tolledWayPoints;
+    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
     // circulation est toujours "vers la destination" puisque seuls les
@@ -1518,7 +1577,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length){
-        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute && lastRoute.rampPoints);
+        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute && lastRoute.rampPoints, lastRoute && lastRoute.tolledWayPoints);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -1654,7 +1713,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       else drawRoute(from, lastArr, route);
 
       const previous = tollStations;
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints);
+      const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
+      route.tolledWayPoints = tolledWayPoints;
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
         s.alerted = prev ? prev.alerted : false;
