@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Itinéraire &amp; Péages</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -676,7 +676,7 @@
   }
   @keyframes spin{to{transform:rotate(360deg);}}
 
-  .leaflet-container{background:#20232a;}
+  .mapboxgl-canvas{background:#20232a;}
 </style>
 </head>
 <body>
@@ -811,14 +811,14 @@
   </div>
 
   <footer class="attrib">
-    Géocodage : Nominatim / Photon · Itinéraire : OSRM · Carte : Leaflet.<br>
+    Géocodage : Nominatim / Photon · Itinéraire : OSRM · Carte : Mapbox.<br>
     Gares de péage : jeu de données officiel data.gouv.fr (réseau routier national concédé), embarqué hors ligne.
     <div class="copyright-line">© RCZ / PREJ Marseille</div>
   </footer>
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
 <script>
 /* Jeu de données officiel des gares de péage (source : gares-peage-2025.csv,
    data.gouv.fr - "Gares de péage du réseau routier national concédé").
@@ -843,45 +843,41 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   const $ = (id) => document.getElementById(id);
 
-  let map = L.map('map', { zoomControl: true }).setView([46.6, 2.4], 6);
-  // Cascade de fonds de carte gratuits, sans clé API. En contexte WebView
-  // (APK généré par un outil comme WebIntoApp), le comportement réseau
-  // (Referer envoyé ou non) dépend de la manière dont l'outil héberge le
-  // contenu : on essaie donc plusieurs fournisseurs et on bascule sur le
-  // suivant si le premier échoue, plutôt que de dépendre d'un seul.
-  const TILE_PROVIDERS = [
-    { url: 'https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}@2x.png', attr: '&copy; OpenStreetMap contributors, style Wikimedia' },
-    { url: 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', attr: '&copy; OpenStreetMap contributors, OSM France', subdomains: 'abc' },
-    { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr: '&copy; OpenStreetMap contributors', subdomains: 'abc' }
-  ];
-  let tileProviderIndex = 0;
-  let currentTileLayer = null;
-  let tileFailCount = 0;
+  // ---------------------------------------------------------------------
+  // ⚠️ À REMPLIR : colle ton token d'accès Mapbox ici (gratuit, sans carte
+  // bancaire, sur https://account.mapbox.com/ après création d'un compte).
+  // Sans token valide, la carte ne s'affichera pas.
+  // ---------------------------------------------------------------------
+  mapboxgl.accessToken = 'pk.eyJ1IjoiYmlsbHkxMzQwMCIsImEiOiJjbXVucHhnczEwMDNzMnhzY2Jmb2theDNpIn0.SWdHSEMG0qEvK5F42wTiFg';
 
-  function loadTileProvider(i){
-    if (currentTileLayer) map.removeLayer(currentTileLayer);
-    const p = TILE_PROVIDERS[i];
-    tileFailCount = 0;
-    currentTileLayer = L.tileLayer(p.url, {
-      maxZoom: 19,
-      subdomains: p.subdomains || 'abc',
-      attribution: p.attr
-    });
-    currentTileLayer.on('tileerror', () => {
-      tileFailCount++;
-      // Si trop de tuiles échouent, on bascule sur le fournisseur suivant
-      if (tileFailCount > 3 && tileProviderIndex < TILE_PROVIDERS.length - 1){
-        tileProviderIndex++;
-        loadTileProvider(tileProviderIndex);
-      }
-    });
-    currentTileLayer.addTo(map);
+  // Petit utilitaire : nos données internes utilisent systématiquement
+  // l'ordre [lat, lon] (comme Leaflet et comme les coordonnées GPS
+  // usuelles), alors que Mapbox attend [lon, lat] partout dans son API.
+  // On ne convertit qu'au moment de parler à Mapbox, jamais ailleurs.
+  const toLngLat = (latLon) => [latLon[1], latLon[0]];
+
+  let map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/streets-v12',
+    center: toLngLat([46.6, 2.4]),
+    zoom: 5
+  });
+  map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+  // La carte doit finir de charger son style avant qu'on puisse ajouter
+  // des sources/calques (tracé, marqueurs) ; ce petit gestionnaire permet
+  // d'attendre ce moment si besoin (utile aussi après une recréation de
+  // la carte, voir recreateMap()).
+  let mapLoaded = false;
+  map.on('load', () => { mapLoaded = true; });
+  function whenMapReady(fn){
+    if (mapLoaded) fn();
+    else map.once('load', fn);
   }
-  loadTileProvider(0);
 
-  let routeLine = null;
-  let endMarkers = L.layerGroup().addTo(map);
-  let tollMarkers = L.layerGroup().addTo(map);
+  let routeLine = null;   // simple indicateur (vrai/faux) : la source/calque Mapbox s'appelle 'route-line'
+  let endMarkers = [];    // tableau d'instances mapboxgl.Marker (départ/arrivée)
+  let tollMarkers = [];   // tableau d'instances mapboxgl.Marker (péages)
   let routeCoords = [];   // [[lat,lon], ...]
   let tollStations = [];  // résultats affichés écran 2
   let lastDep = null, lastArr = null, lastRoute = null;
@@ -891,6 +887,11 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   let navActive = false;
   let liveMarker = null;
   let depOverride = null; // {lat, lon, label} si "ma position actuelle" est utilisée comme départ
+
+  function clearMarkerArray(arr){
+    arr.forEach(m => m.remove());
+    arr.length = 0;
+  }
 
   function setStatus(msg, isError, loading){
     const el = $('status');
@@ -903,7 +904,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('view-tolls').classList.toggle('active', name === 'tolls');
     $('tab-route').classList.toggle('active', name === 'route');
     $('tab-tolls').classList.toggle('active', name === 'tolls');
-    if (name === 'route') setTimeout(() => map.invalidateSize(), 50);
+    if (name === 'route') setTimeout(() => map.resize(), 50);
   }
 
   // ---- Réglages (thème, couleurs, distance d'alerte) ----
@@ -1385,19 +1386,62 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   }
 
   // ---- Rendu carte / résumé ----
+  function computeBounds(coordsLatLon){
+    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+    coordsLatLon.forEach(([lat, lon]) => {
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+    });
+    return [[minLon, minLat], [maxLon, maxLat]]; // format Mapbox : [[lon,lat],[lon,lat]]
+  }
+
+  function makeDotMarker(color){
+    const el = document.createElement('div');
+    el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${color};border:3px solid #14161a;`;
+    return el;
+  }
+
   function drawRoute(dep, arr, route){
-    endMarkers.clearLayers();
-    tollMarkers.clearLayers();
-    if (routeLine) map.removeLayer(routeLine);
+    clearMarkerArray(endMarkers);
+    clearMarkerArray(tollMarkers);
 
-    routeLine = L.polyline(route.coords, { color: '#5ec8d8', weight: 5, opacity: .9 }).addTo(map);
+    whenMapReady(() => {
+      const lineData = {
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: route.coords.map(toLngLat) }
+      };
+      const src = map.getSource('route-line');
+      if (src){
+        src.setData(lineData);
+      } else {
+        map.addSource('route-line', { type: 'geojson', data: lineData });
+        map.addLayer({
+          id: 'route-line-layer',
+          type: 'line',
+          source: 'route-line',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#5ec8d8', 'line-width': 5, 'line-opacity': .9 }
+        });
+      }
+      routeLine = true;
 
-    const depIcon = L.divIcon({ className: '', html: '<div style="width:14px;height:14px;border-radius:50%;background:#5ec8d8;border:3px solid #14161a;"></div>' });
-    const arrIcon = L.divIcon({ className: '', html: '<div style="width:14px;height:14px;border-radius:50%;background:#f5b301;border:3px solid #14161a;"></div>' });
-    L.marker(route.coords[0], { icon: depIcon }).addTo(endMarkers).bindPopup(dep.label);
-    L.marker(route.coords[route.coords.length - 1], { icon: arrIcon }).addTo(endMarkers).bindPopup(arr.label);
+      endMarkers.push(
+        new mapboxgl.Marker({ element: makeDotMarker('#5ec8d8') })
+          .setLngLat(toLngLat(route.coords[0]))
+          .setPopup(new mapboxgl.Popup().setText(dep.label))
+          .addTo(map)
+      );
+      endMarkers.push(
+        new mapboxgl.Marker({ element: makeDotMarker('#f5b301') })
+          .setLngLat(toLngLat(route.coords[route.coords.length - 1]))
+          .setPopup(new mapboxgl.Popup().setText(arr.label))
+          .addTo(map)
+      );
 
-    map.fitBounds(routeLine.getBounds(), { padding: [24, 24] });
+      map.fitBounds(computeBounds(route.coords), { padding: 24 });
+    });
 
     $('summary').classList.add('show');
     $('sum-dist').textContent = (route.distance / 1000).toFixed(0) + ' km';
@@ -1405,14 +1449,21 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   }
 
   function drawTollMarkers(){
-    tollMarkers.clearLayers();
-    tollStations.forEach((s, i) => {
-      const bg = s.called ? '#2d9d5c' : '#ef5b5b';
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="background:${bg};color:#fff;font:700 10px 'Space Grotesk';width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;border:2px solid #14161a;">${i + 1}</div>`
+    clearMarkerArray(tollMarkers);
+    whenMapReady(() => {
+      tollStations.forEach((s, i) => {
+        const bg = s.called ? '#2d9d5c' : '#ef5b5b';
+        const el = document.createElement('div');
+        el.style.cssText = `background:${bg};color:#fff;font:700 10px 'Space Grotesk';width:20px;height:20px;border-radius:5px;display:flex;align-items:center;justify-content:center;border:2px solid #14161a;`;
+        el.textContent = String(i + 1);
+        const popupHtml = `<b>${escapeHtml(s.name)}</b>${s.network ? '<br>' + escapeHtml(s.network) : ''}<br>${s.called ? '✅ Appelé' : '🔴 Pas encore appelé'}`;
+        tollMarkers.push(
+          new mapboxgl.Marker({ element: el })
+            .setLngLat(toLngLat([s.lat, s.lon]))
+            .setPopup(new mapboxgl.Popup().setHTML(popupHtml))
+            .addTo(map)
+        );
       });
-      L.marker([s.lat, s.lon], { icon }).addTo(tollMarkers).bindPopup(`<b>${escapeHtml(s.name)}</b>${s.network ? '<br>' + escapeHtml(s.network) : ''}<br>${s.called ? '✅ Appelé' : '🔴 Pas encore appelé'}`);
     });
   }
 
@@ -1458,7 +1509,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       });
       card.addEventListener('click', () => {
         showView('route');
-        map.setView([s.lat, s.lon], 13);
+        map.jumpTo({ center: toLngLat([s.lat, s.lon]), zoom: 13 });
       });
       list.appendChild(card);
     });
@@ -1504,7 +1555,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('tracking-toggle').disabled = false;
     if (watchId !== null) stopTracking(); // un nouvel itinéraire coupe un suivi précédent
     if (navActive) exitNav();
-    if (liveMarker){ map.removeLayer(liveMarker); liveMarker = null; }
+    if (liveMarker){ liveMarker.remove(); liveMarker = null; }
 
     setStatus(`Itinéraire calculé · ${tollStations.length} gare(s) de péage détectée(s).`);
   }
@@ -1781,13 +1832,11 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // ---- Marqueur de position live ----
   function ensureLiveMarker(lat, lon){
     if (!liveMarker){
-      const icon = L.divIcon({
-        className: '',
-        html: '<div style="width:18px;height:18px;border-radius:50%;background:#5ec8d8;border:3px solid #fff;box-shadow:0 0 0 4px rgba(94,200,216,.35);"></div>'
-      });
-      liveMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(map);
+      const el = document.createElement('div');
+      el.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#5ec8d8;border:3px solid #fff;box-shadow:0 0 0 4px rgba(94,200,216,.35);';
+      liveMarker = new mapboxgl.Marker({ element: el }).setLngLat(toLngLat([lat, lon])).addTo(map);
     } else {
-      liveMarker.setLatLng([lat, lon]);
+      liveMarker.setLngLat(toLngLat([lat, lon]));
     }
   }
 
@@ -1896,50 +1945,42 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     try {
       if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(() => {});
     } catch (e) {}
-    // On repart d'un fournisseur de tuiles propre (le premier de la liste) :
-    // si la petite carte était retombée sur un fournisseur dégradé en cours
-    // de route, le plein écran (qui doit charger beaucoup plus de tuiles
-    // d'un coup) repart ainsi sur de bonnes bases plutôt que d'hériter
-    // d'un état déjà fragilisé.
-    tileProviderIndex = 0;
-    loadTileProvider(0);
     // Le passage en plein écran change la taille du conteneur de la carte ;
-    // Leaflet doit recalculer sa taille APRÈS que le navigateur ait
-    // effectivement appliqué ce nouveau layout, sinon il continue à
-    // afficher des tuiles pour l'ancienne (petite) taille et le reste
-    // de l'écran reste noir. invalidateSize() seul ne suffisant pas
-    // toujours à faire recharger les tuiles manquantes sur certaines
-    // WebView, on force en plus un redessin complet du calque de tuiles.
-    const refreshMap = () => {
-      map.invalidateSize();
-      if (currentTileLayer) currentTileLayer.redraw();
-    };
+    // Mapbox doit recalculer sa taille APRÈS que le navigateur ait
+    // effectivement appliqué ce nouveau layout, sinon la carte garde
+    // l'ancienne (petite) taille. On relance donc resize() à plusieurs
+    // reprises pour couvrir les cas où le premier recalcul est trop tôt.
+    const refreshMap = () => map.resize();
     requestAnimationFrame(() => {
       refreshMap();
       map.setZoom(16);
       setTimeout(refreshMap, 150);
       setTimeout(refreshMap, 500);
       setTimeout(refreshMap, 1200);
-      setTimeout(refreshMap, 2500);
     });
   }
 
-  // Recrée entièrement la carte Leaflet (au lieu de tenter de redimensionner
+  // Recrée entièrement la carte Mapbox (au lieu de tenter de redimensionner
   // la même instance) : certaines WebView gardent un affichage figé/mal
   // positionné après un aller-retour petite carte <-> plein écran, quoi que
-  // l'on essaie côté invalidateSize/redraw. Détruire puis reconstruire la
-  // carte de zéro élimine ce risque, au prix d'un bref rechargement des
-  // tuiles et du tracé.
+  // l'on essaie côté resize(). Détruire puis reconstruire la carte de zéro
+  // élimine ce risque, au prix d'un bref rechargement du tracé et des
+  // marqueurs.
   function recreateMap(){
     try { map.remove(); } catch (e) { console.warn('Suppression carte impossible', e); }
 
-    map = L.map('map', { zoomControl: true }).setView([46.6, 2.4], 6);
-    currentTileLayer = null;
-    tileProviderIndex = 0;
-    loadTileProvider(0);
+    mapLoaded = false;
+    map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: toLngLat([46.6, 2.4]),
+      zoom: 5
+    });
+    map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+    map.on('load', () => { mapLoaded = true; });
 
-    endMarkers = L.layerGroup().addTo(map);
-    tollMarkers = L.layerGroup().addTo(map);
+    endMarkers = [];
+    tollMarkers = [];
     liveMarker = null;
     routeLine = null;
 
@@ -1960,7 +2001,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   // Filet de sécurité supplémentaire : si la fenêtre change de taille
   // (rotation, clavier, barres système) pendant le trajet, on recalcule.
-  window.addEventListener('resize', () => { if (navActive){ map.invalidateSize(); if (currentTileLayer) currentTileLayer.redraw(); } });
+  window.addEventListener('resize', () => { if (navActive) map.resize(); });
 
   $('nav-quit').addEventListener('click', () => { stopTracking(); exitNav(); });
 
