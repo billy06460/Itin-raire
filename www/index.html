@@ -306,7 +306,7 @@
     justify-content:space-between;
     gap:10px;
   }
-  #nav-quit{
+  #nav-quit, #nav-tolls-btn{
     background:rgba(29,32,38,.9);
     border:1px solid var(--line);
     color:var(--text);
@@ -316,6 +316,7 @@
     padding:9px 14px;
     border-radius:9px;
     cursor:pointer;
+    flex-shrink:0;
   }
   .nav-dest{
     font-size:12.5px;
@@ -323,7 +324,7 @@
     background:rgba(29,32,38,.9);
     padding:8px 12px;
     border-radius:9px;
-    max-width:60%;
+    max-width:36%;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
@@ -779,6 +780,7 @@
   <div id="nav-topbar">
     <button id="nav-quit" type="button">✕ Quitter</button>
     <span id="nav-dest" class="nav-dest">—</span>
+    <button id="nav-tolls-btn" type="button">📋 Péages</button>
   </div>
   <div id="nav-bottombar">
     <div class="nav-row nav-row-main">
@@ -901,7 +903,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     rotate: true,
     rotateControl: false,
     touchRotate: false,
-    shiftKeyRotate: false
+    shiftKeyRotate: false,
+    layersControl: false // retire le sélecteur de modes (transport public, vélo, satellite...), app voiture uniquement
   });
 
   let routeLine = null;   // instance L.polyline
@@ -933,7 +936,14 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('view-tolls').classList.toggle('active', name === 'tolls');
     $('tab-route').classList.toggle('active', name === 'route');
     $('tab-tolls').classList.toggle('active', name === 'tolls');
-    if (name === 'route') setTimeout(() => map.invalidateSize(), 50);
+    if (name === 'route'){
+      setTimeout(() => map.invalidateSize(), 50);
+      // Suivi déjà en cours mais plein écran quitté (venant de "Péages") :
+      // le bouton propose de reprendre l'affichage, pas de relancer le suivi.
+      if (typeof watchId !== 'undefined' && watchId !== null && !navActive){
+        $('tracking-toggle').textContent = '📍 Reprendre la navigation';
+      }
+    }
   }
 
   // ---- Réglages (thème, couleurs, distance d'alerte) ----
@@ -1364,29 +1374,49 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       });
       const steps = [];
       const tollHints = [];
+      // Identifiants d'icône plausibles pour un péage dans l'API RouteMM
+      // (vocabulaire anglais standardisé, comme "bridge" dans la doc) :
+      // on vérifie ça en priorité, plus fiable qu'une recherche de texte
+      // français dans un label qui peut varier.
+      const TOLL_ICON_IDS = ['toll', 'toll_gate', 'tollgate', 'peage', 'toll-gate', 'toll_booth'];
       (response.sections || []).forEach(section => {
         (section.actions || []).forEach(action => {
-          const candidateTexts = [
+          const km = (action.distance && typeof action.distance.value === 'number') ? action.distance.value / 1000 : null;
+          const wayLabel = action.way_name || (action.title && action.title.text) || 'Portion de route';
+          steps.push({ label: wayLabel, km });
+
+          if (!action.locations || !Array.isArray(action.locations.origin)) return;
+          const loc = action.locations.origin;
+
+          // Signal 1 (prioritaire) : un POI de l'action a une icône "toll".
+          const tollPoi = Array.isArray(action.pois)
+            ? action.pois.find(p => p.icon && TOLL_ICON_IDS.includes(String(p.icon).toLowerCase()))
+            : null;
+          // Signal 2 (repli) : mention textuelle "péage" dans le nom de
+          // voie, le titre, ou le label d'un POI.
+          const textMatch = !tollPoi && [
             action.way_name,
             action.title && action.title.text,
             ...(Array.isArray(action.pois) ? action.pois.map(p => p.label) : [])
-          ].filter(Boolean);
-          const km = (action.distance && typeof action.distance.value === 'number') ? action.distance.value / 1000 : null;
-          const wayLabel = action.way_name || (action.title && action.title.text) || 'Portion de route';
+          ].filter(Boolean).find(t => /p[ée]age/i.test(t));
 
-          steps.push({ label: wayLabel, km });
-
-          const match = candidateTexts.find(t => /p[ée]age/i.test(t));
-          if (match && action.locations && Array.isArray(action.locations.origin)){
+          if (tollPoi || textMatch){
             tollHints.push({
-              lat: action.locations.origin[1],
-              lon: action.locations.origin[0],
+              lat: loc[1],
+              lon: loc[0],
               km,
-              label: match
+              label: (tollPoi && tollPoi.label) || textMatch
             });
           }
         });
       });
+      // Diagnostic : liste toutes les icônes de POI rencontrées sur ce
+      // trajet, pour identifier facilement le bon identifiant si "toll"
+      // ne correspond pas (visible dans les outils de développement).
+      const allPoiIcons = new Set();
+      (response.sections || []).forEach(s => (s.actions || []).forEach(a => (a.pois || []).forEach(p => { if (p.icon) allPoiIcons.add(p.icon); })));
+      if (allPoiIcons.size) console.debug('[RouteMM] icônes de POI rencontrées sur ce trajet :', [...allPoiIcons]);
+
       return { steps, tollHints };
     } catch (e) {
       console.warn('Roadbook Mappy indisponible', e);
@@ -2231,7 +2261,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
     map = new L.Mappy.Map('map', {
       apikey: MAPPY_API_KEY, center: [46.6, 2.4], zoom: 5,
-      rotate: true, rotateControl: false, touchRotate: false, shiftKeyRotate: false
+      rotate: true, rotateControl: false, touchRotate: false, shiftKeyRotate: false,
+      layersControl: false
     });
 
     endMarkers = [];
@@ -2259,6 +2290,14 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   window.addEventListener('resize', () => { if (navActive) map.invalidateSize(); });
 
   $('nav-quit').addEventListener('click', () => { stopTracking(); exitNav(); });
+
+  // Permet de consulter la liste des péages sans interrompre le trajet en
+  // cours : on quitte juste l'affichage plein écran (le suivi GPS continue
+  // en arrière-plan), avec un bouton pour y revenir ensuite.
+  $('nav-tolls-btn').addEventListener('click', () => {
+    exitNav();
+    showView('tolls');
+  });
 
   let gpsFixReceived = false;
   let gpsWaitTimer = null;
@@ -2384,6 +2423,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
 
   $('tracking-toggle').addEventListener('click', () => {
     if (watchId === null){ startTracking(); enterNav(); }
+    else if (!navActive){ enterNav(); } // suivi déjà en cours (venant de "Péages") : on reprend juste l'affichage
     else { stopTracking(); exitNav(); }
   });
 
