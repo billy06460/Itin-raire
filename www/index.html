@@ -578,44 +578,30 @@
     line-height:1.4;
   }
 
-  .steps-hint{
-    margin:0 0 14px;
-    font-size:12.5px;
-    color:var(--text-dim);
-    line-height:1.4;
-  }
-  #steps-list{
-    max-height:55vh;
-    overflow-y:auto;
-    display:flex;
-    flex-direction:column;
-    gap:6px;
-  }
-  .step-row{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:10px;
-    background:var(--panel-2);
-    border:1px solid var(--line);
-    border-radius:9px;
-    padding:9px 12px;
-    font-size:13px;
-  }
-  .step-row.toll{ border-color:var(--red); }
-  .step-row .step-label{ flex:1; }
-  .step-row .step-km{ color:var(--teal); font-weight:600; font-size:12px; white-space:nowrap; }
 
   /* ---- Vue péages ---- */
   #view-tolls .head{
     padding:16px 18px 8px;
     display:flex;
-    align-items:baseline;
+    align-items:flex-start;
     justify-content:space-between;
     flex-shrink:0;
   }
   #view-tolls .head h2{margin:0; font-size:17px;}
   #view-tolls .head span{font-size:12.5px; color:var(--text-dim);}
+  .tolls-close-btn{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    font:inherit;
+    font-weight:700;
+    font-size:15px;
+    width:34px;
+    height:34px;
+    border-radius:9px;
+    cursor:pointer;
+    flex-shrink:0;
+  }
   .hidden-tolls-bar{
     margin:0 18px 10px;
     font-size:12px;
@@ -787,7 +773,6 @@
 
       <div class="cta-bottom">
         <button id="goto-tolls" type="button" disabled>Voir les gares de péage <b id="goto-count"></b></button>
-        <button id="goto-steps" type="button" disabled>Liste des itinéraires (détail RouteMM)</button>
         <button id="tracking-toggle" type="button" disabled>▶ Commencer le trajet</button>
       </div>
     </section>
@@ -795,8 +780,11 @@
     <!-- ÉCRAN 2 : liste des péages -->
     <section id="view-tolls" class="view">
       <div class="head">
-        <h2>Gares de péage</h2>
-        <span id="tolls-route-label"></span>
+        <div>
+          <h2>Gares de péage</h2>
+          <span id="tolls-route-label"></span>
+        </div>
+        <button id="tolls-close" type="button" class="tolls-close-btn" title="Revenir à la carte">✕</button>
       </div>
       <div id="hidden-tolls-bar" class="hidden-tolls-bar" style="display:none;"></div>
       <div id="toll-list"></div>
@@ -870,18 +858,6 @@
           <span id="alert-distance-value" class="settings-slider-value">10 km</span>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- Panneau détail de l'itinéraire (roadbook RouteMM) -->
-  <div id="steps-overlay" class="toll-alert-overlay">
-    <div class="settings-card">
-      <div class="settings-head">
-        <h3>🧭 Détail de l'itinéraire (RouteMM)</h3>
-        <button id="steps-close" type="button" class="settings-close">✕</button>
-      </div>
-      <p class="steps-hint">Étapes telles que calculées par Mappy — utile pour vérifier exactement quelles routes/bretelles sont réellement empruntées.</p>
-      <div id="steps-list"></div>
     </div>
   </div>
 
@@ -1016,31 +992,6 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('settings-overlay').classList.remove('show');
   });
 
-  function renderStepsList(){
-    const list = $('steps-list');
-    list.innerHTML = '';
-    const steps = (lastRoute && lastRoute.roadbookSteps) || [];
-    if (!steps.length){
-      list.innerHTML = '<div class="empty-state">Aucun détail d\u2019itinéraire disponible (RouteMM indisponible pour ce trajet).</div>';
-      return;
-    }
-    steps.forEach(st => {
-      const row = document.createElement('div');
-      const isToll = /p[ée]age/i.test(st.label);
-      row.className = 'step-row' + (isToll ? ' toll' : '');
-      const kmLabel = st.km !== null ? st.km.toFixed(1) + ' km' : '';
-      row.innerHTML = `<span class="step-label">${isToll ? '🔴 ' : ''}${escapeHtml(st.label)}</span><span class="step-km">${kmLabel}</span>`;
-      list.appendChild(row);
-    });
-  }
-
-  $('goto-steps').addEventListener('click', () => {
-    renderStepsList();
-    $('steps-overlay').classList.add('show');
-  });
-  $('steps-close').addEventListener('click', () => {
-    $('steps-overlay').classList.remove('show');
-  });
 
   $('theme-dark-btn').addEventListener('click', () => { appSettings.theme = 'dark'; saveSettings(); applySettings(); });
   $('theme-light-btn').addEventListener('click', () => { appSettings.theme = 'light'; saveSettings(); applySettings(); });
@@ -1061,6 +1012,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   $('alert-distance-slider').addEventListener('change', () => { saveSettings(); applySettings(); });
 
   $('tab-route').addEventListener('click', () => showView('route'));
+  $('tolls-close').addEventListener('click', () => showView('route'));
   $('tab-tolls').addEventListener('click', () => { if (!$('tab-tolls').disabled) showView('tolls'); });
   $('goto-tolls').addEventListener('click', () => showView('tolls'));
   $('swap-btn').addEventListener('click', () => {
@@ -1902,18 +1854,15 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     drawRoute(dep, arr, route);
 
     setStatus('Recherche des gares de péage sur le trajet…', false, true);
-    // Recherche 100% locale (jeu de données officiel embarqué) comme
-    // source principale : ne dépend d'aucun appel réseau, donc fonctionne
-    // même hors ligne. Les signaux OSM et RouteMM sont des compléments
-    // optionnels, en réseau : s'ils échouent ou sont indisponibles (ou,
-    // comme constaté pour RouteMM, ne remontent jamais de mention de
-    // péage), la recherche continue quand même avec les autres signaux.
-    const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
+    // Source unique désormais : le roadbook Mappy (RouteMM), dont
+    // l'extraction a été corrigée (champ "label" + "instructions", qui
+    // contiennent bien les mentions "Payer X € (Péage ...)" observées sur
+    // mappy.com). Fini les faux positifs d'échangeurs non empruntés liés
+    // à notre propre détection par distance géométrique.
     const roadbook = await fetchMappyRoadbook(dep, arr);
-    route.tolledWayPoints = tolledWayPoints;
     route.roadbookSteps = roadbook.steps;
     route.roadbookHints = roadbook.tollHints;
-    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
+    tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
     tollStations = applyTollCostFallback(route, routeCoords, tollStations);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
@@ -1927,7 +1876,6 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('sum-tolls').textContent = tollStations.length;
     $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
     $('goto-tolls').disabled = false;
-    $('goto-steps').disabled = false;
     $('tab-tolls').disabled = false;
 
     $('tracking-toggle').disabled = false;
@@ -2006,7 +1954,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length && lastRoute){
-        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute.rampPoints, lastRoute.tolledWayPoints, lastRoute.roadRefs, lastRoute.roadbookHints);
+        tollStations = buildTollStationsFromRoadbook(lastRoute.roadbookHints || []);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -2142,12 +2090,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       else drawRoute(from, lastArr, route);
 
       const previous = tollStations;
-      const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
       const roadbook = await fetchMappyRoadbook(from, lastArr);
-      route.tolledWayPoints = tolledWayPoints;
       route.roadbookSteps = roadbook.steps;
       route.roadbookHints = roadbook.tollHints;
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
+      tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
       tollStations = applyTollCostFallback(route, routeCoords, tollStations);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
