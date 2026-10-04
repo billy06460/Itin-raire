@@ -1286,25 +1286,37 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     // manœuvres de bretelle, références de route, position en km) doit
     // rester calculée sur UN SEUL ET MÊME tracé, sans quoi un léger écart
     // entre deux moteurs de routage différents peut fausser le calcul de
-    // position et dégrader la précision. OSRM reste donc la référence
-    // unique pour "coords" (utilisé pour toute la détection), et le tracé
-    // Mappy n'est utilisé que comme "displayCoords" — uniquement pour la
-    // ligne dessinée à l'écran, jamais pour les calculs.
-    const osrmResult = await routeBetweenOSRM(a, b);
+    // position et dégrader la précision.
+    //
+    // Mappy est désormais la référence UNIQUE pour "coords" (utilisé pour
+    // l'affichage ET pour toute la détection) : son moteur professionnel
+    // calcule un trajet plus fiable que le serveur de démo OSRM public, qui
+    // peut choisir un chemin sensiblement différent (constaté : itinéraire
+    // par l'intérieur des terres au lieu de l'autoroute côtière réellement
+    // empruntée). Les manœuvres/références de route d'OSRM restent
+    // utilisées comme signal complémentaire pour affiner la détection,
+    // même si elles sont calculées sur un tracé légèrement différent — un
+    // signal imparfait reste préférable à aucun signal.
+    const mappyResult = await routeBetweenMappy(a, b);
+    let osrmExtras = { rampPoints: [], roadRefs: [] };
     try {
-      const mappyResult = await routeBetweenMappy(a, b);
-      if (mappyResult && mappyResult.distance && mappyResult.duration){
-        return Object.assign({}, osrmResult, {
-          displayCoords: mappyResult.coords,
-          displayDistance: mappyResult.distance,
-          displayDuration: mappyResult.duration,
-          hasTollCost: mappyResult.hasTollCost
-        });
+      const osrmResult = await routeBetweenOSRM(a, b);
+      osrmExtras = { rampPoints: osrmResult.rampPoints, roadRefs: osrmResult.roadRefs };
+      if (!mappyResult || !mappyResult.distance || !mappyResult.duration){
+        return Object.assign({}, osrmResult, { hasTollCost: null });
       }
     } catch (e) {
-      console.warn('Mappy indisponible, tracé OSRM conservé', e);
+      console.warn('OSRM indisponible (signal complémentaire uniquement)', e);
+      if (!mappyResult || !mappyResult.distance || !mappyResult.duration) throw e;
     }
-    return osrmResult;
+    return {
+      coords: mappyResult.coords,
+      distance: mappyResult.distance,
+      duration: mappyResult.duration,
+      hasTollCost: mappyResult.hasTollCost,
+      rampPoints: osrmExtras.rampPoints,
+      roadRefs: osrmExtras.roadRefs
+    };
   }
 
   // ---- Tronçons OpenStreetMap tagués "à péage" (toll=yes) ----
@@ -1723,11 +1735,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     clearMarkerArray(endMarkers);
     clearMarkerArray(tollMarkers);
 
-    // Le tracé Mappy (displayCoords), quand disponible, sert uniquement à
-    // l'affichage visuel de la ligne — jamais aux calculs de péages, qui
-    // restent basés sur route.coords (OSRM) pour garder une référence
-    // unique et cohérente (voir routeBetween).
-    const lineCoords = route.displayCoords || route.coords;
+    const lineCoords = route.coords;
 
     if (routeLine){
       routeLine.setLatLngs(lineCoords);
@@ -1743,8 +1751,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     map.fitBounds(computeBounds(lineCoords), { padding: [24, 24] });
 
     $('summary').classList.add('show');
-    $('sum-dist').textContent = ((route.displayDistance || route.distance) / 1000).toFixed(0) + ' km';
-    $('sum-time').textContent = formatDuration(route.displayDuration || route.duration);
+    $('sum-dist').textContent = (route.distance / 1000).toFixed(0) + ' km';
+    $('sum-time').textContent = formatDuration(route.duration);
   }
 
   function drawTollMarkers(){
@@ -1815,28 +1823,20 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // SANS les filtres de confirmation (juste par proximité au tracé), pour
   // essayer de retrouver une gare candidate dans le fichier officiel —
   // affichée clairement comme "estimée" plutôt que silencieusement omise.
+  // Note : une recherche de secours "sans filtre" a été essayée ici, mais
+  // elle reproduisait systématiquement le problème des échangeurs non
+  // empruntés qu'on cherche justement à éviter — elle a été retirée. On se
+  // contente désormais d'informer honnêtement, sans jamais afficher de
+  // gare non confirmée.
   function applyTollCostFallback(route, coords, stations){
     const banner = $('toll-warning-banner');
     if (!route.hasTollCost || (stations && stations.length)){
       banner.style.display = 'none';
       banner.textContent = '';
-      return stations;
-    }
-
-    const candidates = findTollsOnRoute(
-      coords, { Bpv: 400, Ech: 400, Urb: 350 },
-      route.rampPoints, route.tolledWayPoints, route.roadRefs, route.roadbookHints,
-      /* relaxed */ true
-    );
-
-    if (candidates.length){
+    } else {
       banner.style.display = 'block';
-      banner.textContent = '⚠️ Gare estimée : Mappy indique un péage sur ce trajet. Cette gare n\u2019a pas pu être confirmée précisément (proximité au tracé uniquement).';
-      return candidates;
+      banner.textContent = '⚠️ Mappy indique un péage sur ce trajet, mais aucune gare n\u2019a pu être identifiée précisément.';
     }
-
-    banner.style.display = 'block';
-    banner.textContent = '⚠️ Mappy indique un péage sur ce trajet, mais aucune gare, même approximative, n\u2019a été trouvée dans le fichier officiel. Vérifie la "Liste des itinéraires" pour repérer la portion concernée.';
     return stations;
   }
 
@@ -1854,15 +1854,18 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     drawRoute(dep, arr, route);
 
     setStatus('Recherche des gares de péage sur le trajet…', false, true);
-    // Source unique désormais : le roadbook Mappy (RouteMM), dont
-    // l'extraction a été corrigée (champ "label" + "instructions", qui
-    // contiennent bien les mentions "Payer X € (Péage ...)" observées sur
-    // mappy.com). Fini les faux positifs d'échangeurs non empruntés liés
-    // à notre propre détection par distance géométrique.
+    // Détection combinée : fichier officiel data.gouv.fr comme source
+    // principale, vérifiée par les manœuvres OSRM, les tronçons OSM, et le
+    // roadbook Mappy en signal bonus quand il mentionne explicitement un
+    // péage. Calculée sur le tracé Mappy (routeCoords), qui correspond au
+    // trajet réellement proposé — le roadbook seul s'est révélé muet sur
+    // les péages à l'usage, d'où cette approche combinée plus robuste.
+    const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
     const roadbook = await fetchMappyRoadbook(dep, arr);
+    route.tolledWayPoints = tolledWayPoints;
     route.roadbookSteps = roadbook.steps;
     route.roadbookHints = roadbook.tollHints;
-    tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
+    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
     tollStations = applyTollCostFallback(route, routeCoords, tollStations);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
@@ -1954,7 +1957,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length && lastRoute){
-        tollStations = buildTollStationsFromRoadbook(lastRoute.roadbookHints || []);
+        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute.rampPoints, lastRoute.tolledWayPoints, lastRoute.roadRefs, lastRoute.roadbookHints);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -2090,10 +2093,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       else drawRoute(from, lastArr, route);
 
       const previous = tollStations;
+      const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
       const roadbook = await fetchMappyRoadbook(from, lastArr);
+      route.tolledWayPoints = tolledWayPoints;
       route.roadbookSteps = roadbook.steps;
       route.roadbookHints = roadbook.tollHints;
-      tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
       tollStations = applyTollCostFallback(route, routeCoords, tollStations);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
