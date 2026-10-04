@@ -552,6 +552,32 @@
   }
   .toll-alert-ok{ background:var(--amber); color:#1a1300; }
 
+  .estimated-badge{
+    display:inline-block;
+    font-size:9.5px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.3px;
+    color:var(--amber);
+    background:rgba(245,179,1,.14);
+    border:1px solid var(--amber);
+    border-radius:5px;
+    padding:1px 5px;
+    vertical-align:middle;
+    margin-left:4px;
+  }
+
+  #toll-warning-banner{
+    margin:10px 18px 0;
+    padding:10px 14px;
+    border-radius:9px;
+    background:rgba(245,179,1,.1);
+    border:1px solid var(--amber);
+    color:var(--amber);
+    font-size:12.5px;
+    line-height:1.4;
+  }
+
   .steps-hint{
     margin:0 0 14px;
     font-size:12.5px;
@@ -754,6 +780,8 @@
         <div class="sep"></div>
         <div class="metric"><b id="sum-tolls">–</b><span>péages détectés</span></div>
       </div>
+
+      <div id="toll-warning-banner" style="display:none;"></div>
 
       <div id="map"></div>
 
@@ -1283,10 +1311,17 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       });
       if (coords.length < 2) return null;
 
+      // On ne récupère que la PRÉSENCE d'un coût de péage (jamais le
+      // montant, qui n'est pas affiché) : sert de filet de sécurité pour
+      // repérer les cas où Mappy sait qu'il y a un péage sur ce trajet
+      // alors que notre propre détection n'en aurait trouvé aucun.
+      const hasTollCost = !!(route.prices && route.prices.toll && route.prices.toll.value > 0);
+
       return {
         coords,
         distance: route.length && route.length.value,
-        duration: route.time && route.time.value
+        duration: route.time && route.time.value,
+        hasTollCost
       };
     } catch (e) {
       console.warn('Service Mappy indisponible', e);
@@ -1310,7 +1345,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         return Object.assign({}, osrmResult, {
           displayCoords: mappyResult.coords,
           displayDistance: mappyResult.distance,
-          displayDuration: mappyResult.duration
+          displayDuration: mappyResult.duration,
+          hasTollCost: mappyResult.hasTollCost
         });
       }
     } catch (e) {
@@ -1379,6 +1415,13 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       // on vérifie ça en priorité, plus fiable qu'une recherche de texte
       // français dans un label qui peut varier.
       const TOLL_ICON_IDS = ['toll', 'toll_gate', 'tollgate', 'peage', 'toll-gate', 'toll_booth'];
+      // Les instructions utilisent le "component system" (liste de lignes,
+      // chacune avec un champ .text) : on aplatit tout ça en simples
+      // chaînes de caractères.
+      function flattenInstructions(instructions){
+        if (!Array.isArray(instructions)) return [];
+        return instructions.map(line => (line && line.text) || null).filter(Boolean);
+      }
       (response.sections || []).forEach(section => {
         (section.actions || []).forEach(action => {
           const km = (action.distance && typeof action.distance.value === 'number') ? action.distance.value / 1000 : null;
@@ -1388,25 +1431,38 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
           if (!action.locations || !Array.isArray(action.locations.origin)) return;
           const loc = action.locations.origin;
 
+          // Tout le texte disponible sur cette action : nom de voie,
+          // titre, label (DEPRECATED côté doc mais encore rempli dans les
+          // faits, comme observé sur mappy.com : "Payer 2,90 € (Péage
+          // Tunnel Prado Sud)"), instructions détaillées, et labels des POI.
+          const allTexts = [
+            action.way_name,
+            action.label,
+            action.title && action.title.text,
+            ...flattenInstructions(action.instructions),
+            ...(Array.isArray(action.pois) ? action.pois.map(p => p.label) : [])
+          ].filter(Boolean);
+
           // Signal 1 (prioritaire) : un POI de l'action a une icône "toll".
           const tollPoi = Array.isArray(action.pois)
             ? action.pois.find(p => p.icon && TOLL_ICON_IDS.includes(String(p.icon).toLowerCase()))
             : null;
-          // Signal 2 (repli) : mention textuelle "péage" dans le nom de
-          // voie, le titre, ou le label d'un POI.
-          const textMatch = !tollPoi && [
-            action.way_name,
-            action.title && action.title.text,
-            ...(Array.isArray(action.pois) ? action.pois.map(p => p.label) : [])
-          ].filter(Boolean).find(t => /p[ée]age/i.test(t));
+          // Signal 2 : type/icône de l'action lui-même évoquant un péage
+          // (ex: "Payer 2,90 € (Péage ...)" ou "Prendre un ticket").
+          const actionIsToll = [action.action_type, action.icon].some(v => v && TOLL_ICON_IDS.includes(String(v).toLowerCase()));
+          // Signal 3 (repli) : mention textuelle "péage" n'importe où dans
+          // les textes de l'action.
+          const textMatch = allTexts.find(t => /p[ée]age/i.test(t));
 
-          if (tollPoi || textMatch){
-            tollHints.push({
-              lat: loc[1],
-              lon: loc[0],
-              km,
-              label: (tollPoi && tollPoi.label) || textMatch
-            });
+          if (tollPoi || actionIsToll || textMatch){
+            // Si le texte suit le format observé sur mappy.com
+            // ("... (Péage Nom De La Gare)"), on extrait le nom précis
+            // entre parenthèses plutôt que la phrase complète.
+            let label = (tollPoi && tollPoi.label) || textMatch || wayLabel;
+            const parenMatch = (textMatch || '').match(/p[ée]age\s+([^)]+)\)/i);
+            if (parenMatch) label = parenMatch[1].trim();
+
+            tollHints.push({ lat: loc[1], lon: loc[0], km, label });
           }
         });
       });
@@ -1542,7 +1598,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   // (seuil serré, pour ne pas attraper une sortie voisine non empruntée),
   // un tunnel urbain a un seuil intermédiaire (accès moins précisément
   // repéré que les gares officielles).
-  function findTollsOnRoute(coords, thresholds, rampPoints, tolledWayPoints, roadRefs, roadbookHints){
+  function findTollsOnRoute(coords, thresholds, rampPoints, tolledWayPoints, roadRefs, roadbookHints, relaxed){
     thresholds = thresholds || { Bpv: 250, Ech: 250, Urb: 200 };
     const maxPossible = Math.max(thresholds.Bpv, thresholds.Ech, thresholds.Urb || 200);
     const coarse = sampleRoute(coords, 50); // points de recherche rapprochés pour un filtrage précis
@@ -1635,7 +1691,11 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       // "13A905420CD" utilisés pour les échangeurs). Corrige la confusion
       // entre deux autoroutes parallèles très proches (ex: Baillargues sur
       // l'A709, à tort détectée quand le trajet passe en réalité par l'A9).
-      if (/^A\d+$/.test(t.route)){
+      // En mode "relaxed" (recherche de secours quand Mappy confirme un
+      // coût de péage mais qu'aucune gare n'a pu être confirmée
+      // normalement), on saute les filtres de confirmation ci-dessous et
+      // on garde tout candidat par pure proximité au tracé.
+      if (!relaxed && /^A\d+$/.test(t.route)){
         const actualRef = nearestRoadRef(tollKm);
         if (actualRef){
           const actualRefs = actualRef.split(/[;/]/);
@@ -1652,7 +1712,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       // positifs dans les zones urbaines à échangeurs denses). Si un seul
       // des deux signaux est disponible (l'autre a échoué/n'a rien
       // renvoyé), on se contente de celui-là.
-      if ((t.type === 'Ech' || t.type === 'Urb') && best > 35){
+      if (!relaxed && (t.type === 'Ech' || t.type === 'Urb') && best > 35){
         const rampDist = nearestRampDist(t.lat, t.lon, tollKm);
         const wayDist = nearestTolledWayDist(t.lat, t.lon);
         const rampConfirms = rampDist !== null && rampDist <= RAMP_PROXIMITY_METERS;
@@ -1684,7 +1744,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         lat: t.lat,
         lon: t.lon,
         km: tollKm,
-        dist: best
+        dist: best,
+        estimated: !!relaxed
       });
     });
 
@@ -1769,7 +1830,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
         <button type="button" class="toll-hide-btn" title="Masquer ce péage définitivement">✕</button>
         <div class="toll-idx">${i + 1}</div>
         <div class="toll-info">
-          <p class="name">${escapeHtml(s.name)}</p>
+          <p class="name">${escapeHtml(s.name)}${s.estimated ? ' <span class="estimated-badge">estimé</span>' : ''}</p>
           <p class="meta">${escapeHtml(s.network || 'Réseau autoroutier concédé')}${s.direction ? ' · ' + escapeHtml(s.direction) : ''}</p>
         </div>
         <div class="toll-right">
@@ -1796,6 +1857,37 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   }
 
   // ---- Flux principal ----
+  // Filet de sécurité : Mappy sait si ce trajet a un coût de péage (sans
+  // qu'on affiche jamais ce montant). Si notre détection normale n'a rien
+  // trouvé alors que ce coût existe, on relance une recherche de secours
+  // SANS les filtres de confirmation (juste par proximité au tracé), pour
+  // essayer de retrouver une gare candidate dans le fichier officiel —
+  // affichée clairement comme "estimée" plutôt que silencieusement omise.
+  function applyTollCostFallback(route, coords, stations){
+    const banner = $('toll-warning-banner');
+    if (!route.hasTollCost || (stations && stations.length)){
+      banner.style.display = 'none';
+      banner.textContent = '';
+      return stations;
+    }
+
+    const candidates = findTollsOnRoute(
+      coords, { Bpv: 400, Ech: 400, Urb: 350 },
+      route.rampPoints, route.tolledWayPoints, route.roadRefs, route.roadbookHints,
+      /* relaxed */ true
+    );
+
+    if (candidates.length){
+      banner.style.display = 'block';
+      banner.textContent = '⚠️ Gare estimée : Mappy indique un péage sur ce trajet. Cette gare n\u2019a pas pu être confirmée précisément (proximité au tracé uniquement).';
+      return candidates;
+    }
+
+    banner.style.display = 'block';
+    banner.textContent = '⚠️ Mappy indique un péage sur ce trajet, mais aucune gare, même approximative, n\u2019a été trouvée dans le fichier officiel. Vérifie la "Liste des itinéraires" pour repérer la portion concernée.';
+    return stations;
+  }
+
   async function planRoute(dep, arr){
     lastDep = dep; lastArr = arr;
 
@@ -1809,15 +1901,20 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('nav-dest').textContent = dep.label + ' → ' + arr.label;
     drawRoute(dep, arr, route);
 
-    setStatus('Recherche des gares de péage sur le trajet (RouteMM)…', false, true);
-    // Seule source utilisée désormais : le roadbook RouteMM (même moteur
-    // que le trajet affiché). Si RouteMM ne mentionne pas de péage à un
-    // endroit, rien n'y est affiché — fini les échangeurs non empruntés
-    // détectés à tort par simple proximité géométrique.
+    setStatus('Recherche des gares de péage sur le trajet…', false, true);
+    // Recherche 100% locale (jeu de données officiel embarqué) comme
+    // source principale : ne dépend d'aucun appel réseau, donc fonctionne
+    // même hors ligne. Les signaux OSM et RouteMM sont des compléments
+    // optionnels, en réseau : s'ils échouent ou sont indisponibles (ou,
+    // comme constaté pour RouteMM, ne remontent jamais de mention de
+    // péage), la recherche continue quand même avec les autres signaux.
+    const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
     const roadbook = await fetchMappyRoadbook(dep, arr);
+    route.tolledWayPoints = tolledWayPoints;
     route.roadbookSteps = roadbook.steps;
     route.roadbookHints = roadbook.tollHints;
-    tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
+    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
+    tollStations = applyTollCostFallback(route, routeCoords, tollStations);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
     // circulation est toujours "vers la destination" puisque seuls les
@@ -1908,8 +2005,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       saveHiddenTolls();
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
-      if (routeCoords.length && lastRoute && lastRoute.roadbookHints){
-        tollStations = buildTollStationsFromRoadbook(lastRoute.roadbookHints);
+      if (routeCoords.length && lastRoute){
+        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute.rampPoints, lastRoute.tolledWayPoints, lastRoute.roadRefs, lastRoute.roadbookHints);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -2045,10 +2142,13 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       else drawRoute(from, lastArr, route);
 
       const previous = tollStations;
+      const tolledWayPoints = await fetchTolledWaySegments(routeCoords);
       const roadbook = await fetchMappyRoadbook(from, lastArr);
+      route.tolledWayPoints = tolledWayPoints;
       route.roadbookSteps = roadbook.steps;
       route.roadbookHints = roadbook.tollHints;
-      tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
+      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
+      tollStations = applyTollCostFallback(route, routeCoords, tollStations);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
         s.alerted = prev ? prev.alerted : false;
