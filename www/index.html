@@ -722,6 +722,39 @@
   @keyframes spin{to{transform:rotate(360deg);}}
 
   #map{ background:#20232a; }
+
+  /* ---- Convoi (partage de position) ---- */
+  #convoy-btn{ margin-top:8px; }
+  #convoy-btn b{ color:var(--teal); font-family:ui-monospace,Menlo,Consolas,monospace; letter-spacing:.5px; }
+  .convoy-intro{ margin:4px 0 0; font-size:13px; color:var(--text-dim); line-height:1.45; }
+  .convoy-input{
+    width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel-2); color:var(--text); font:inherit; font-size:15px;
+  }
+  .convoy-primary{
+    width:100%; background:var(--amber); border:0; color:#1a1300; font:inherit; font-weight:700;
+    font-size:15px; padding:13px; border-radius:10px; cursor:pointer;
+  }
+  .convoy-or{ text-align:center; color:var(--text-dim); font-size:12px; margin:12px 0 8px; }
+  .convoy-join-row{ display:flex; gap:10px; }
+  .convoy-join-row .convoy-input{ text-transform:uppercase; letter-spacing:1px; }
+  .convoy-join-row .theme-btn{ flex:0 0 auto; padding:0 16px; }
+  .convoy-code{
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:22px; font-weight:700;
+    letter-spacing:2px; color:var(--teal); margin-bottom:6px;
+  }
+  .convoy-link{
+    font-size:12px; color:var(--text-dim); word-break:break-all; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:10px;
+  }
+  .convoy-toggle{ display:flex; gap:10px; align-items:center; margin:14px 0 6px; font-size:14px; }
+  .convoy-toggle input{ width:20px; height:20px; accent-color:var(--amber); }
+  .convoy-conn{ font-size:12px; color:var(--text-dim); margin-bottom:10px; }
+  .convoy-hint{ margin:8px 0 0; font-size:12px; color:var(--text-dim); line-height:1.45; }
+  .nav-convoy{
+    background:var(--panel); border:1px solid var(--line); color:var(--teal);
+    border-radius:10px; padding:7px 12px; font-size:12.5px; font-weight:600; text-align:center;
+  }
 </style>
 </head>
 <body>
@@ -774,6 +807,7 @@
       <div class="cta-bottom">
         <button id="goto-tolls" type="button" disabled>Voir les gares de péage <b id="goto-count"></b></button>
         <button id="tracking-toggle" type="button" disabled>▶ Commencer le trajet</button>
+        <button id="convoy-btn" type="button">👥 Convoi <b id="convoy-state"></b></button>
       </div>
     </section>
 
@@ -803,6 +837,7 @@
       <div class="nav-metric"><b id="nav-remaining-dist">–</b><span>restant</span></div>
       <div class="nav-metric"><b id="nav-remaining-time">–</b><span>estimé</span></div>
     </div>
+    <div id="nav-convoy" class="nav-convoy" style="display:none;"></div>
     <div id="nav-next-toll" class="nav-next-toll">Recherche du signal GPS…</div>
   </div>
 
@@ -818,6 +853,51 @@
       <div class="toll-alert-actions">
         <button id="toll-alert-call" class="toll-alert-call" type="button" disabled title="Numéro à configurer prochainement">📞 Appeler</button>
         <button id="toll-alert-dismiss" class="toll-alert-ok" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panneau convoi -->
+  <div id="convoy-overlay" class="toll-alert-overlay">
+    <div class="settings-card">
+      <div class="settings-head">
+        <h3>👥 Convoi</h3>
+        <button id="convoy-close" type="button" class="settings-close">✕</button>
+      </div>
+      <p class="convoy-intro">Partage ta position en direct avec les autres véhicules. Un convoi = un lien = une carte.</p>
+
+      <div class="settings-section">
+        <p class="settings-label">Mon véhicule</p>
+        <input id="convoy-name" class="convoy-input" type="text" maxlength="24" placeholder="Nom affiché (ex : Camion 1)" autocomplete="off">
+      </div>
+
+      <div id="convoy-none" class="settings-section">
+        <p class="settings-label">Convoi</p>
+        <button id="convoy-create" type="button" class="convoy-primary">➕ Créer un convoi</button>
+        <div class="convoy-or">ou rejoindre un convoi existant</div>
+        <div class="convoy-join-row">
+          <input id="convoy-join-code" class="convoy-input" type="text" maxlength="16" placeholder="CODE" autocomplete="off" autocapitalize="characters">
+          <button id="convoy-join" type="button" class="theme-btn">Rejoindre</button>
+        </div>
+      </div>
+
+      <div id="convoy-active" class="settings-section" style="display:none;">
+        <p class="settings-label">Convoi en cours</p>
+        <div id="convoy-code-label" class="convoy-code">—</div>
+        <div id="convoy-link" class="convoy-link">—</div>
+        <div class="settings-row-btns">
+          <button id="convoy-copy" type="button" class="theme-btn">📋 Copier le lien</button>
+          <button id="convoy-share" type="button" class="theme-btn">📤 Partager</button>
+        </div>
+        <label class="convoy-toggle"><input type="checkbox" id="convoy-sharing"> Partager ma position pendant le trajet</label>
+        <div id="convoy-conn" class="convoy-conn">—</div>
+        <button id="convoy-leave" type="button" class="settings-reset-btn">Quitter ce convoi</button>
+      </div>
+
+      <div class="settings-section">
+        <p class="settings-label">Adresse de la page de suivi</p>
+        <input id="convoy-base" class="convoy-input" type="url" placeholder="https://…/suivi.html" autocomplete="off">
+        <p class="convoy-hint">Adresse où est hébergé le fichier <b>suivi.html</b> (par exemple GitHub Pages). Elle sert à fabriquer le lien du convoi. Sans elle, tu peux quand même donner le <b>code</b> : il se saisit sur la page de suivi.</p>
       </div>
     </div>
   </div>
@@ -857,6 +937,12 @@
           <input type="range" id="alert-distance-slider" min="5" max="10" step="1" value="10">
           <span id="alert-distance-value" class="settings-slider-value">10 km</span>
         </div>
+      </div>
+
+      <div class="settings-section" id="bg-section" style="display:none;">
+        <p class="settings-label">GPS en arrière-plan</p>
+        <p class="convoy-hint" style="margin:0 0 10px;">Le suivi continue écran éteint ou app réduite (notification « Suivi GPS du trajet en cours »). Pour qu’Android ne coupe pas l’app : Autorisations → Position → <b>Toujours autoriser</b>, et Batterie → <b>Sans restriction</b>.</p>
+        <button type="button" id="bg-open-settings" class="settings-reset-btn">Ouvrir les réglages de l’app</button>
       </div>
     </div>
   </div>
@@ -1012,7 +1098,16 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   $('alert-distance-slider').addEventListener('change', () => { saveSettings(); applySettings(); });
 
   $('tab-route').addEventListener('click', () => showView('route'));
-  $('tolls-close').addEventListener('click', () => showView('route'));
+  $('tolls-close').addEventListener('click', () => {
+    // Si un trajet est en cours (venant du bouton "📋 Péages" en plein
+    // écran), on reprend directement la navigation plutôt que de montrer
+    // l'écran itinéraire classique.
+    if (watchId !== null && !navActive){
+      enterNav();
+    } else {
+      showView('route');
+    }
+  });
   $('tab-tolls').addEventListener('click', () => { if (!$('tab-tolls').disabled) showView('tolls'); });
   $('goto-tolls').addEventListener('click', () => showView('tolls'));
   $('swap-btn').addEventListener('click', () => {
@@ -1865,7 +1960,11 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     route.tolledWayPoints = tolledWayPoints;
     route.roadbookSteps = roadbook.steps;
     route.roadbookHints = roadbook.tollHints;
-    tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
+    // Test demandé : on ne garde que les mentions du roadbook Mappy,
+    // plus le fichier officiel data.gouv.fr. Si le roadbook ne mentionne
+    // jamais de péage (observé jusqu'ici sur tous les trajets testés), la
+    // liste sera vide.
+    tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
     tollStations = applyTollCostFallback(route, routeCoords, tollStations);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
@@ -1957,7 +2056,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length && lastRoute){
-        tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, lastRoute.rampPoints, lastRoute.tolledWayPoints, lastRoute.roadRefs, lastRoute.roadbookHints);
+        tollStations = buildTollStationsFromRoadbook(lastRoute.roadbookHints || []);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -2098,7 +2197,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       route.tolledWayPoints = tolledWayPoints;
       route.roadbookSteps = roadbook.steps;
       route.roadbookHints = roadbook.tollHints;
-      tollStations = findTollsOnRoute(routeCoords, { Bpv: 250, Ech: 250, Urb: 200 }, route.rampPoints, tolledWayPoints, route.roadRefs, roadbook.tollHints);
+      tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
       tollStations = applyTollCostFallback(route, routeCoords, tollStations);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
@@ -2112,6 +2211,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderTollList(lastDep, lastArr);
       $('sum-tolls').textContent = tollStations.length;
       $('goto-count').textContent = tollStations.length ? `(${tollStations.length})` : '';
+      setStatus(`Itinéraire recalculé · ${tollStations.length} gare(s) de péage détectée(s).`);
       renderPendingTollBar();
     } catch (e) {
       console.warn('Recalcul impossible', e);
@@ -2404,6 +2504,93 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     } catch (e) { console.warn('Vérification de reprise impossible', e); }
   }
 
+  // =====================================================================
+  // GPS en arrière-plan (Android natif) : plugin de géolocalisation avec
+  // service au premier plan (notification permanente). Le suivi continue
+  // écran éteint ou app réduite. Hors appli native (navigateur) ou si le
+  // plugin est indisponible, on retombe sur le GPS standard du navigateur.
+  // =====================================================================
+  let bgWatcherId = null;
+  let bgStopRequested = false;
+  let bgPlugin;                 // undefined = pas encore cherché, null = indisponible
+
+  function getBackgroundGeo(){
+    if (bgPlugin !== undefined) return bgPlugin;
+    bgPlugin = null;
+    try {
+      const C = window.Capacitor;
+      if (C && typeof C.isNativePlatform === 'function' && C.isNativePlatform() && typeof C.registerPlugin === 'function'){
+        bgPlugin = C.registerPlugin('BackgroundGeolocation');
+      }
+    } catch (e) { console.warn('Plugin GPS arrière-plan indisponible', e); }
+    return bgPlugin;
+  }
+
+  function startForegroundWatch(onFix, onError){
+    // Une prise de position immédiate (en plus du suivi continu ci-dessous)
+    // pour afficher un premier résultat le plus vite possible.
+    navigator.geolocation.getCurrentPosition(onFix, onError, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+    watchId = navigator.geolocation.watchPosition(
+      onFix,
+      onError,
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 25000 }
+    );
+  }
+
+  function startBackgroundWatch(bg, onFix, onError){
+    bgStopRequested = false;
+    watchId = 'bg';   // marqueur « suivi actif » (le reste de l'app teste watchId !== null)
+    bg.addWatcher({
+      backgroundTitle: 'Itinéraire & Péages',
+      backgroundMessage: 'Suivi GPS du trajet en cours',
+      requestPermissions: true,
+      stale: false,
+      distanceFilter: 3
+    }, (loc, err) => {
+      if (err){
+        if (err.code === 'NOT_AUTHORIZED'){
+          setStatus('Localisation non autorisée : choisis « Toujours autoriser » dans les réglages de l’app.', true);
+          if (confirm('La localisation est refusée pour cette app.\n\nOuvrir les réglages pour l’autoriser ?')){
+            try { bg.openSettings(); } catch (e) { /* ignore */ }
+          }
+        }
+        onError(err);
+        return;
+      }
+      if (!loc) return;
+      onFix({ coords: {
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        heading: (typeof loc.bearing === 'number' && !isNaN(loc.bearing)) ? loc.bearing : null,
+        speed: (typeof loc.speed === 'number' && !isNaN(loc.speed)) ? loc.speed : null
+      } });
+    }).then((id) => {
+      if (bgStopRequested){ try { bg.removeWatcher({ id: id }); } catch (e) { /* ignore */ } return; }
+      bgWatcherId = id;
+    }).catch((e) => {
+      console.warn('GPS arrière-plan indisponible, repli sur le GPS standard', e);
+      bgPlugin = null;
+      if (!bgStopRequested){ watchId = null; startForegroundWatch(onFix, onError); }
+    });
+  }
+
+  function stopBackgroundWatch(){
+    bgStopRequested = true;
+    if (bgWatcherId !== null && bgPlugin){
+      try { bgPlugin.removeWatcher({ id: bgWatcherId }); } catch (e) { /* ignore */ }
+    }
+    bgWatcherId = null;
+  }
+
+  // Raccourci vers les réglages Android de l'app (batterie : « Sans restriction »).
+  (function initBackgroundSettings(){
+    if (!getBackgroundGeo()) return;
+    $('bg-section').style.display = '';
+    $('bg-open-settings').addEventListener('click', () => {
+      try { getBackgroundGeo().openSettings(); } catch (e) { console.warn(e); }
+    });
+  })();
+
   function startTracking(){
     if (!('geolocation' in navigator)){
       setStatus("La géolocalisation n'est pas disponible sur cet appareil/navigateur.", true);
@@ -2424,6 +2611,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       clearTimeout(gpsWaitTimer);
       const { latitude, longitude, heading, speed } = pos.coords;
       checkProximity(latitude, longitude);
+      try { publishConvoyPosition(latitude, longitude, heading, speed); } catch (e) { console.warn('Convoi', e); }
       ensureLiveMarker(latitude, longitude);
       if (navActive){
         map.panTo([latitude, longitude]);
@@ -2449,27 +2637,26 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       if (!gpsFixReceived) setStatus(geoErrorMessage(err), true);
     };
 
-    // Une prise de position immédiate (en plus du suivi continu ci-dessous)
-    // pour afficher un premier résultat le plus vite possible.
-    navigator.geolocation.getCurrentPosition(onFix, onError, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
-
-    watchId = navigator.geolocation.watchPosition(
-      onFix,
-      onError,
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 25000 }
-    );
+    const bg = getBackgroundGeo();
+    if (bg) startBackgroundWatch(bg, onFix, onError);
+    else startForegroundWatch(onFix, onError);
     $('tracking-toggle').classList.add('active');
     $('tracking-toggle').textContent = '■ Arrêter le trajet';
     saveActiveTrip();
+    renderConvoyUi();
   }
 
   function stopTracking(){
-    if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    if (typeof watchId === 'number') navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    stopBackgroundWatch();
     clearTimeout(gpsWaitTimer);
     lastBearingFix = null;
     $('tracking-toggle').classList.remove('active');
     $('tracking-toggle').textContent = '▶ Commencer le trajet';
     clearActiveTrip();
+    clearConvoyPublishing();
+    renderConvoyUi();
   }
 
   $('tracking-toggle').addEventListener('click', () => {
@@ -2477,6 +2664,212 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     else if (!navActive){ enterNav(); } // suivi déjà en cours (venant de "Péages") : on reprend juste l'affichage
     else { stopTracking(); exitNav(); }
   });
+
+  // =====================================================================
+  // Convoi : partage de position en direct (MQTT sur WebSocket, relais
+  // publics gratuits). Un convoi = un code = un lien = une carte.
+  // Les positions sont publiées sous  itinpeages/v1/<CODE>/<véhicule>.
+  // =====================================================================
+  const CONVOY_ROOT = 'itinpeages/v1/';
+  function randId(n){
+    const A = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+    const a = new Uint8Array(n);
+    (window.crypto || window.msCrypto).getRandomValues(a);
+    return Array.from(a, x => A[x % A.length]).join('');
+  }
+  function defaultTrackingBase(){
+    const h = location.hostname;
+    if (/^https?:$/.test(location.protocol) && h && h !== 'localhost' && h !== '127.0.0.1'){
+      try { return new URL('suivi.html', location.href).href; } catch (e) { /* ignore */ }
+    }
+    return '';
+  }
+  function loadConvoy(){
+    try {
+      const raw = localStorage.getItem('convoy');
+      if (raw){
+        const c = JSON.parse(raw);
+        if (c && c.vehicleId) return Object.assign({ code: '', name: '', sharing: true, base: '' }, c);
+      }
+    } catch (e) { /* ignore */ }
+    return { code: '', vehicleId: randId(6), name: '', sharing: true, base: '' };
+  }
+  let convoy = loadConvoy();
+  function saveConvoy(){
+    try { localStorage.setItem('convoy', JSON.stringify(convoy)); } catch (e) { /* ignore */ }
+  }
+  let convoyMq = null;
+  let convoyConn = 'idle';       // idle | connecting | online | offline
+  let lastConvoyPub = 0;
+  let lastConvoyRouteKey = '';
+
+  function convoyBase(){ return (convoy.base || '').trim() || defaultTrackingBase(); }
+  function convoyLink(){
+    if (!convoy.code) return '';
+    const base = convoyBase();
+    return base ? base + (base.indexOf('?') >= 0 ? '&' : '?') + 'c=' + convoy.code : '';
+  }
+  function convoyTopic(suffix){ return CONVOY_ROOT + convoy.code + '/' + convoy.vehicleId + (suffix || ''); }
+
+  function getConvoyMq(){
+    if (!convoyMq){
+      convoyMq = new MiniMQTT({});
+      convoyMq.onStatus((st) => { convoyConn = st; renderConvoyUi(); });
+    }
+    return convoyMq;
+  }
+
+  function convoyStats(lat, lon){
+    if (!routeCoords.length || !routeCumMeters.length) return {};
+    const { idx } = nearestIndexOnRoute(lat, lon, routeCoords);
+    const remM = Math.max(0, routeTotalMeters - routeCumMeters[idx]);
+    const avg = routeTotalMeters / Math.max(routeTotalSeconds, 1);
+    const out = { remKm: +(remM / 1000).toFixed(1), etaMin: avg > 0 ? Math.round(remM / avg / 60) : null };
+    const next = tollStations.find(s => !s.passed);
+    if (next){
+      out.nextToll = next.name;
+      out.nextTollKm = +Math.max(0, next.km - routeCumMeters[idx] / 1000).toFixed(1);
+    }
+    return out;
+  }
+
+  function convoyRouteKey(){
+    const n = routeCoords.length;
+    return n ? n + ':' + routeCoords[0].join(',') + ':' + routeCoords[n - 1].join(',') : '';
+  }
+  function publishConvoyRoute(){
+    const key = convoyRouteKey();
+    if (!key || key === lastConvoyRouteKey) return;
+    lastConvoyRouteKey = key;
+    const step = Math.max(1, Math.ceil(routeCoords.length / 160));
+    const r = [];
+    for (let i = 0; i < routeCoords.length; i += step) r.push([+routeCoords[i][0].toFixed(4), +routeCoords[i][1].toFixed(4)]);
+    const last = routeCoords[routeCoords.length - 1];
+    r.push([+last[0].toFixed(4), +last[1].toFixed(4)]);
+    getConvoyMq().publish(convoyTopic('/route'), JSON.stringify({ r: r }), true);
+  }
+
+  // Appelée à chaque position GPS reçue pendant un trajet.
+  function publishConvoyPosition(lat, lon, heading, speed){
+    if (!convoy.code || !convoy.sharing) return;
+    const now = Date.now();
+    if (now - lastConvoyPub < 4000) return;   // une position toutes les ~4 s au maximum
+    lastConvoyPub = now;
+    const msg = Object.assign({
+      name: convoy.name || 'Véhicule',
+      lat: +lat.toFixed(5),
+      lon: +lon.toFixed(5),
+      speed: (typeof speed === 'number' && !isNaN(speed)) ? +speed.toFixed(1) : null,
+      heading: (typeof heading === 'number' && !isNaN(heading)) ? Math.round(heading) : null,
+      ts: now,
+      dest: lastArr ? lastArr.label : null
+    }, convoyStats(lat, lon));
+    const mq = getConvoyMq();
+    publishConvoyRoute();
+    mq.publish(convoyTopic(), JSON.stringify(msg), true);
+  }
+
+  // Retire ce véhicule de la carte du convoi (fin de trajet, partage coupé, convoi quitté).
+  function clearConvoyPublishing(codeOverride){
+    const code = codeOverride || convoy.code;
+    lastConvoyPub = 0;
+    lastConvoyRouteKey = '';
+    if (!code || !convoyMq) return;
+    const base = CONVOY_ROOT + code + '/' + convoy.vehicleId;
+    convoyMq.publish(base, '', true);
+    convoyMq.publish(base + '/route', '', true);
+    const mq = convoyMq;
+    convoyMq = null;
+    convoyConn = 'idle';
+    setTimeout(() => mq.end(), 2500);   // laisse le temps aux messages d'effacement de partir
+  }
+
+  function renderConvoyUi(){
+    const has = !!convoy.code;
+    $('convoy-state').textContent = has ? convoy.code : '';
+    $('convoy-none').style.display = has ? 'none' : '';
+    $('convoy-active').style.display = has ? '' : 'none';
+    if ($('convoy-name') !== document.activeElement) $('convoy-name').value = convoy.name || '';
+    if ($('convoy-base') !== document.activeElement) $('convoy-base').value = convoy.base || '';
+    $('convoy-base').placeholder = defaultTrackingBase() || 'https://…/suivi.html';
+    if (has){
+      $('convoy-code-label').textContent = convoy.code;
+      const link = convoyLink();
+      $('convoy-link').textContent = link || 'Renseigne l’adresse de la page de suivi ci-dessous pour obtenir un lien. En attendant, donne le code.';
+      $('convoy-sharing').checked = !!convoy.sharing;
+    }
+    const tracking = watchId !== null;
+    let connTxt;
+    if (!convoy.sharing) connTxt = 'Partage coupé : tu n\u2019apparais pas sur la carte.';
+    else if (!tracking) connTxt = 'Prêt : ta position sera partagée dès que tu commences le trajet.';
+    else if (convoyConn === 'online') connTxt = '🟢 Position partagée en direct.';
+    else connTxt = '🟠 Connexion au relais…';
+    $('convoy-conn').textContent = connTxt;
+
+    const badge = $('nav-convoy');
+    if (has && convoy.sharing){
+      badge.style.display = '';
+      badge.textContent = '👥 Convoi ' + convoy.code + ' · ' + (convoyConn === 'online' ? 'position partagée' : tracking ? 'connexion…' : 'prêt');
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  function setConvoyCode(code){
+    convoy.code = code;
+    convoy.sharing = true;
+    lastConvoyPub = 0;
+    lastConvoyRouteKey = '';
+    saveConvoy();
+    renderConvoyUi();
+  }
+
+  $('convoy-btn').addEventListener('click', () => { renderConvoyUi(); $('convoy-overlay').classList.add('show'); });
+  $('convoy-close').addEventListener('click', () => { $('convoy-overlay').classList.remove('show'); });
+  $('convoy-name').addEventListener('input', (e) => { convoy.name = e.target.value.trim().slice(0, 24); saveConvoy(); lastConvoyPub = 0; });
+  $('convoy-base').addEventListener('change', (e) => { convoy.base = e.target.value.trim(); saveConvoy(); renderConvoyUi(); });
+  $('convoy-create').addEventListener('click', () => {
+    if (!convoy.name){ $('convoy-name').focus(); setStatus('Donne d’abord un nom à ton véhicule.', true); return; }
+    setConvoyCode(randId(10));
+  });
+  $('convoy-join').addEventListener('click', () => {
+    const v = $('convoy-join-code').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (v.length < 4){ $('convoy-join-code').focus(); return; }
+    if (!convoy.name){ $('convoy-name').focus(); setStatus('Donne d’abord un nom à ton véhicule.', true); return; }
+    setConvoyCode(v);
+    $('convoy-join-code').value = '';
+  });
+  $('convoy-sharing').addEventListener('change', (e) => {
+    convoy.sharing = e.target.checked;
+    saveConvoy();
+    if (!convoy.sharing) clearConvoyPublishing();
+    renderConvoyUi();
+  });
+  $('convoy-leave').addEventListener('click', () => {
+    if (!confirm('Quitter le convoi ' + convoy.code + ' ? Tu disparaîtras de sa carte.')) return;
+    clearConvoyPublishing();
+    convoy.code = '';
+    saveConvoy();
+    renderConvoyUi();
+  });
+  async function copyText(t){
+    try { await navigator.clipboard.writeText(t); return true; }
+    catch (e) { window.prompt('Copie ce texte :', t); return false; }
+  }
+  $('convoy-copy').addEventListener('click', async () => {
+    const txt = convoyLink() || convoy.code;
+    if (await copyText(txt)) { $('convoy-conn').textContent = '✅ ' + (convoyLink() ? 'Lien copié.' : 'Code copié (pas encore d’adresse de suivi).'); }
+  });
+  $('convoy-share').addEventListener('click', async () => {
+    const link = convoyLink();
+    const text = link ? 'Suis notre convoi en direct : ' + link : 'Code du convoi : ' + convoy.code;
+    if (navigator.share){
+      try { await navigator.share({ title: 'Convoi ' + convoy.code, text: text }); } catch (e) { /* annulé */ }
+    } else {
+      await copyText(link || convoy.code);
+    }
+  });
+  renderConvoyUi();
 
   // Applique le thème/couleurs/distance d'alerte sauvegardés, une fois que
   // toutes les variables et fonctions nécessaires sont bien déclarées.
@@ -2487,6 +2880,240 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   checkResumeTrip();
 
 })();
+</script>
+<script>
+/* MiniMQTT — mini client MQTT 3.1.1 sur WebSocket (QoS 0, retain, wildcards).
+ * Sans dépendance : utilisé par l'app (publication) et la page de suivi (abonnement).
+ * Brokers publics gratuits essayés tour à tour si l'un ne répond pas. */
+(function(root){
+  'use strict';
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  function concat(arrs){
+    let n = 0;
+    arrs.forEach(a => { n += a.length; });
+    const out = new Uint8Array(n);
+    let o = 0;
+    arrs.forEach(a => { out.set(a, o); o += a.length; });
+    return out;
+  }
+  function str(s){
+    const b = enc.encode(s);
+    return concat([Uint8Array.of(b.length >> 8, b.length & 255), b]);
+  }
+  function varLen(n){
+    const a = [];
+    do {
+      let d = n % 128;
+      n = Math.floor(n / 128);
+      if (n > 0) d |= 128;
+      a.push(d);
+    } while (n > 0);
+    return Uint8Array.from(a);
+  }
+  function packet(first, body){
+    return concat([Uint8Array.of(first), varLen(body.length), body]);
+  }
+  function topicMatches(filter, topic){
+    const f = filter.split('/');
+    const t = topic.split('/');
+    for (let i = 0; i < f.length; i++){
+      if (f[i] === '#') return true;
+      if (i >= t.length) return false;
+      if (f[i] !== '+' && f[i] !== t[i]) return false;
+    }
+    return f.length === t.length;
+  }
+
+  const DEFAULT_URLS = [
+    'wss://broker.emqx.io:8084/mqtt',
+    'wss://broker.hivemq.com:8884/mqtt',
+    'wss://test.mosquitto.org:8081/'
+  ];
+
+  function MiniMQTT(opts){
+    opts = opts || {};
+    // Ordre de priorité : option du constructeur, puis window.CONVOY_BROKERS (relais perso), puis relais publics.
+    this.urls = (opts.urls && opts.urls.length) ? opts.urls : ((root.CONVOY_BROKERS && root.CONVOY_BROKERS.length) ? root.CONVOY_BROKERS : DEFAULT_URLS);
+    this.clientId = opts.clientId || ('ip-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4));
+    this.keepAlive = opts.keepAlive || 30;
+    this.urlIdx = 0;
+    this.ws = null;
+    this.connected = false;
+    this.ended = false;
+    this.attempt = 0;
+    this.buf = new Uint8Array(0);
+    this.subs = new Map();      // filtre -> [handlers]
+    this.pending = new Map();   // topic -> {payload, retain} (dernier message seulement)
+    this.statusFns = [];
+    this.pingTimer = null;
+    this.connTimer = null;
+    this.retryTimer = null;
+    this.packetId = 1;
+  }
+
+  MiniMQTT.prototype.onStatus = function(fn){ this.statusFns.push(fn); };
+  MiniMQTT.prototype._status = function(s, extra){
+    this.statusFns.forEach(fn => { try { fn(s, extra); } catch (e) { /* ignore */ } });
+  };
+
+  MiniMQTT.prototype.connect = function(){
+    if (this.ended || this.ws) return;
+    const url = this.urls[this.urlIdx % this.urls.length];
+    this._status('connecting', url);
+    let ws;
+    try { ws = new WebSocket(url, 'mqtt'); }
+    catch (e) { this._scheduleRetry(); return; }
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    this.buf = new Uint8Array(0);
+
+    // Si le broker ne répond pas assez vite, on passe au suivant.
+    clearTimeout(this.connTimer);
+    this.connTimer = setTimeout(() => {
+      if (!this.connected && this.ws === ws){ try { ws.close(); } catch (e) { /* ignore */ } }
+    }, 9000);
+
+    ws.onopen = () => {
+      const body = concat([
+        str('MQTT'),
+        Uint8Array.of(4, 0x02, this.keepAlive >> 8, this.keepAlive & 255),
+        str(this.clientId)
+      ]);
+      this._send(packet(0x10, body));
+    };
+    ws.onmessage = (ev) => {
+      if (this.ws !== ws) return;
+      this._onData(new Uint8Array(ev.data));
+    };
+    // Selon l'environnement, un échec de connexion peut ne déclencher que
+    // "error" (sans "close") : on traite les deux de la même façon. Le
+    // garde-fou "this.ws !== ws" évite de traiter deux fois le même échec.
+    const onGone = () => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      const wasConnected = this.connected;
+      this.connected = false;
+      clearInterval(this.pingTimer);
+      clearTimeout(this.connTimer);
+      if (this.ended) return;
+      if (!wasConnected) this.urlIdx++; // ce broker ne marche pas : on essaie le suivant
+      this._status('offline');
+      this._scheduleRetry();
+    };
+    ws.onerror = onGone;
+    ws.onclose = onGone;
+  };
+
+  MiniMQTT.prototype._scheduleRetry = function(){
+    if (this.ended) return;
+    clearTimeout(this.retryTimer);
+    const delay = Math.min(1000 * Math.pow(2, this.attempt++), 15000);
+    this.retryTimer = setTimeout(() => this.connect(), delay);
+  };
+
+  MiniMQTT.prototype._send = function(bytes){
+    if (this.ws && this.ws.readyState === 1){
+      try { this.ws.send(bytes); return true; } catch (e) { return false; }
+    }
+    return false;
+  };
+
+  MiniMQTT.prototype._onData = function(chunk){
+    this.buf = concat([this.buf, chunk]);
+    for (;;){
+      if (this.buf.length < 2) return;
+      let mult = 1, len = 0, i = 1, b, count = 0;
+      do {
+        if (i >= this.buf.length) return;      // en-tête incomplet
+        b = this.buf[i++];
+        len += (b & 127) * mult;
+        mult *= 128;
+        if (++count > 4){ try { this.ws.close(); } catch (e) { /* ignore */ } return; }
+      } while (b & 128);
+      if (this.buf.length < i + len) return;   // paquet incomplet
+      const type = this.buf[0] >> 4;
+      const flags = this.buf[0] & 15;
+      const body = this.buf.slice(i, i + len);
+      this.buf = this.buf.slice(i + len);
+      this._handle(type, flags, body);
+    }
+  };
+
+  MiniMQTT.prototype._handle = function(type, flags, body){
+    if (type === 2){ // CONNACK
+      if (body[1] !== 0){ try { this.ws.close(); } catch (e) { /* ignore */ } return; }
+      this.connected = true;
+      this.attempt = 0;
+      clearTimeout(this.connTimer);
+      clearInterval(this.pingTimer);
+      this.pingTimer = setInterval(() => this._send(Uint8Array.of(0xC0, 0)), Math.max(5, this.keepAlive / 2) * 1000);
+      this.subs.forEach((_, filter) => this._sendSubscribe(filter));
+      this.pending.forEach((m, topic) => this._sendPublish(topic, m.payload, m.retain));
+      this.pending.clear();
+      this._status('online', this.urls[this.urlIdx % this.urls.length]);
+    } else if (type === 3){ // PUBLISH
+      const qos = (flags >> 1) & 3;
+      const tlen = (body[0] << 8) | body[1];
+      const topic = dec.decode(body.subarray(2, 2 + tlen));
+      let off = 2 + tlen;
+      if (qos > 0) off += 2;
+      const payload = body.subarray(off);
+      const retained = !!(flags & 1);
+      this.subs.forEach((handlers, filter) => {
+        if (topicMatches(filter, topic)){
+          handlers.forEach(h => { try { h(topic, payload, retained); } catch (e) { console.warn(e); } });
+        }
+      });
+    }
+    // SUBACK (9) et PINGRESP (13) : rien à faire.
+  };
+
+  MiniMQTT.prototype._sendSubscribe = function(filter){
+    const id = this.packetId++ & 0xFFFF || 1;
+    this._send(packet(0x82, concat([Uint8Array.of(id >> 8, id & 255), str(filter), Uint8Array.of(0)])));
+  };
+
+  MiniMQTT.prototype._sendPublish = function(topic, payload, retain){
+    const data = (typeof payload === 'string') ? enc.encode(payload) : payload;
+    return this._send(packet(0x30 | (retain ? 1 : 0), concat([str(topic), data])));
+  };
+
+  /** Abonnement (rejoué automatiquement après une reconnexion). */
+  MiniMQTT.prototype.subscribe = function(filter, handler){
+    if (!this.subs.has(filter)) this.subs.set(filter, []);
+    this.subs.get(filter).push(handler);
+    if (this.connected) this._sendSubscribe(filter);
+    this.connect();
+  };
+
+  /** Publication ; si hors-ligne, seul le dernier message par topic est gardé et envoyé à la reconnexion. */
+  MiniMQTT.prototype.publish = function(topic, payload, retain){
+    if (this.ended) return;
+    if (!(this.connected && this._sendPublish(topic, payload, retain))){
+      this.pending.set(topic, { payload: payload, retain: !!retain });
+    }
+    this.connect();
+  };
+
+  MiniMQTT.prototype.end = function(){
+    this.ended = true;
+    clearInterval(this.pingTimer);
+    clearTimeout(this.connTimer);
+    clearTimeout(this.retryTimer);
+    if (this.ws){
+      try { this._send(Uint8Array.of(0xE0, 0)); this.ws.close(); } catch (e) { /* ignore */ }
+    }
+    this.ws = null;
+    this.connected = false;
+  };
+
+  MiniMQTT.topicMatches = topicMatches;
+  root.MiniMQTT = MiniMQTT;
+})(typeof window !== 'undefined' ? window : globalThis);
+
 </script>
 </body>
 </html>
