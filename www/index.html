@@ -895,6 +895,13 @@
       </div>
 
       <div class="settings-section">
+        <p class="settings-label">Serveur de suivi sécurisé</p>
+        <input id="convoy-server" class="convoy-input" type="url" placeholder="https://suivi.exemple.fr" autocomplete="off">
+        <input id="convoy-key" class="convoy-input" type="password" placeholder="Clé conducteur" autocomplete="off" style="margin-top:6px;">
+        <p class="convoy-hint">Serveur privé de l’entité de contrôle (un seul domaine HTTPS). Si renseigné, la position est envoyée à ce serveur et le lien du convoi pointe dessus. Laisser vide pour utiliser le mode public ci-dessous.</p>
+      </div>
+
+      <div class="settings-section">
         <p class="settings-label">Adresse de la page de suivi</p>
         <input id="convoy-base" class="convoy-input" type="url" placeholder="https://…/suivi.html" autocomplete="off">
         <p class="convoy-hint">Adresse où est hébergé le fichier <b>suivi.html</b> (par exemple GitHub Pages). Elle sert à fabriquer le lien du convoi. Sans elle, tu peux quand même donner le <b>code</b> : il se saisit sur la page de suivi.</p>
@@ -1821,6 +1828,19 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     return Array.from(bestByName.values()).sort((a, b) => a.km - b.km);
   }
 
+  // Détection finale (fichier officiel data.gouv.fr, 1261 gares) :
+  //  - barrière de pleine voie : sur l'autoroute elle-même -> le tracé doit
+  //    passer à moins de 80 m ;
+  //  - gare d'échangeur : elle est SUR la bretelle -> le tracé doit passer à
+  //    moins de 30 m du point de la gare, c'est-à-dire qu'il EMPRUNTE la
+  //    bretelle (entrée ou sortie). Une gare de bretelle qu'on dépasse sur
+  //    l'autoroute sans la prendre est à plus de 100 m du tracé : ignorée.
+  // Le tracé analysé est celui de Mappy (routeCoords).
+  const TOLL_MAX_DIST = { Bpv: 80, Ech: 30, Urb: 60 };
+  function detectTolls(coords){
+    return findTollsOnRoute(coords, TOLL_MAX_DIST, null, null, null, null, false);
+  }
+
   // ---- Rendu carte / résumé ----
   function computeBounds(coordsLatLon){
     return L.latLngBounds(coordsLatLon);
@@ -1960,11 +1980,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     route.tolledWayPoints = tolledWayPoints;
     route.roadbookSteps = roadbook.steps;
     route.roadbookHints = roadbook.tollHints;
-    // Test demandé : on ne garde que les mentions du roadbook Mappy,
-    // plus le fichier officiel data.gouv.fr. Si le roadbook ne mentionne
-    // jamais de péage (observé jusqu'ici sur tous les trajets testés), la
-    // liste sera vide.
-    tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
+    // Gares du fichier officiel retenues selon la géométrie du tracé Mappy
+    // (bretelle : seulement si le tracé l'emprunte, voir detectTolls).
+    tollStations = detectTolls(routeCoords);
     tollStations = applyTollCostFallback(route, routeCoords, tollStations);
     // Réinitialise l'état d'alerte (nouvel itinéraire = nouvelles gares à surveiller),
     // mais conserve le statut "appelé" d'une session à l'autre. Le sens de
@@ -2056,7 +2074,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       renderHiddenTollsBar();
       // Recalcule l'affichage avec les péages redevenus visibles
       if (routeCoords.length && lastRoute){
-        tollStations = buildTollStationsFromRoadbook(lastRoute.roadbookHints || []);
+        tollStations = detectTolls(routeCoords);
         tollStations.forEach(s => { s.called = calledTollNames.has(s.name); s.direction = lastArr ? 'Direction ' + lastArr.label : ''; });
         drawTollMarkers();
         renderTollList(lastDep, lastArr);
@@ -2197,7 +2215,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       route.tolledWayPoints = tolledWayPoints;
       route.roadbookSteps = roadbook.steps;
       route.roadbookHints = roadbook.tollHints;
-      tollStations = buildTollStationsFromRoadbook(roadbook.tollHints);
+      tollStations = detectTolls(routeCoords);
       tollStations = applyTollCostFallback(route, routeCoords, tollStations);
       tollStations.forEach(s => {
         const prev = previous.find(p => p.name === s.name);
@@ -2689,10 +2707,10 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       const raw = localStorage.getItem('convoy');
       if (raw){
         const c = JSON.parse(raw);
-        if (c && c.vehicleId) return Object.assign({ code: '', name: '', sharing: true, base: '' }, c);
+        if (c && c.vehicleId) return Object.assign({ code: '', name: '', sharing: true, base: '', server: '', key: '' }, c);
       }
     } catch (e) { /* ignore */ }
-    return { code: '', vehicleId: randId(6), name: '', sharing: true, base: '' };
+    return { code: '', vehicleId: randId(6), name: '', sharing: true, base: '', server: '', key: '' };
   }
   let convoy = loadConvoy();
   function saveConvoy(){
@@ -2703,7 +2721,31 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   let lastConvoyPub = 0;
   let lastConvoyRouteKey = '';
 
-  function convoyBase(){ return (convoy.base || '').trim() || defaultTrackingBase(); }
+  function serverUrl(){
+    const v = (convoy.server || '').trim().replace(/\/+$/, '');
+    return /^(https:\/\/[^\s/]+|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?)$/i.test(v) && convoy.key ? v : '';   // HTTPS obligatoire (http seulement en local)
+  }
+  // Mode serveur sécurisé : POST HTTPS authentifié (clé conducteur), sans WebSocket.
+  function srvSend(kind, body){
+    const srv = serverUrl();
+    if (!srv) return;
+    if (convoyConn !== 'online') { convoyConn = 'connecting'; }
+    return fetch(srv + '/api/' + kind + '/' + convoy.code + '/' + convoy.vehicleId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': convoy.key },
+      body: JSON.stringify(body || {}),
+      keepalive: true
+    }).then((r) => {
+      if (r.status === 429) return;                       // limite de débit : sans gravité
+      convoyConn = r.ok ? 'online' : (r.status === 401 ? 'denied' : 'offline');
+      renderConvoyUi();
+    }).catch(() => { convoyConn = 'offline'; renderConvoyUi(); });
+  }
+  function convoyBase(){
+    const srv = serverUrl();
+    if (srv) return srv + '/';
+    return (convoy.base || '').trim() || defaultTrackingBase();
+  }
   function convoyLink(){
     if (!convoy.code) return '';
     const base = convoyBase();
@@ -2746,6 +2788,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     for (let i = 0; i < routeCoords.length; i += step) r.push([+routeCoords[i][0].toFixed(4), +routeCoords[i][1].toFixed(4)]);
     const last = routeCoords[routeCoords.length - 1];
     r.push([+last[0].toFixed(4), +last[1].toFixed(4)]);
+    if (serverUrl()) { srvSend('route', { r: r }); return; }
     getConvoyMq().publish(convoyTopic('/route'), JSON.stringify({ r: r }), true);
   }
 
@@ -2764,6 +2807,7 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       ts: now,
       dest: lastArr ? lastArr.label : null
     }, convoyStats(lat, lon));
+    if (serverUrl()) { publishConvoyRoute(); srvSend('pos', msg); return; }
     const mq = getConvoyMq();
     publishConvoyRoute();
     mq.publish(convoyTopic(), JSON.stringify(msg), true);
@@ -2774,6 +2818,12 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     const code = codeOverride || convoy.code;
     lastConvoyPub = 0;
     lastConvoyRouteKey = '';
+    if (serverUrl() && code){
+      const srv = serverUrl();
+      fetch(srv + '/api/clear/' + code + '/' + convoy.vehicleId, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Api-Key': convoy.key }, body: '{}', keepalive: true }).catch(() => {});
+      convoyConn = 'idle';
+      return;
+    }
     if (!code || !convoyMq) return;
     const base = CONVOY_ROOT + code + '/' + convoy.vehicleId;
     convoyMq.publish(base, '', true);
@@ -2791,6 +2841,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     $('convoy-active').style.display = has ? '' : 'none';
     if ($('convoy-name') !== document.activeElement) $('convoy-name').value = convoy.name || '';
     if ($('convoy-base') !== document.activeElement) $('convoy-base').value = convoy.base || '';
+    if ($('convoy-server') !== document.activeElement) $('convoy-server').value = convoy.server || '';
+    if ($('convoy-key') !== document.activeElement) $('convoy-key').value = convoy.key || '';
     $('convoy-base').placeholder = defaultTrackingBase() || 'https://…/suivi.html';
     if (has){
       $('convoy-code-label').textContent = convoy.code;
@@ -2802,7 +2854,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
     let connTxt;
     if (!convoy.sharing) connTxt = 'Partage coupé : tu n\u2019apparais pas sur la carte.';
     else if (!tracking) connTxt = 'Prêt : ta position sera partagée dès que tu commences le trajet.';
-    else if (convoyConn === 'online') connTxt = '🟢 Position partagée en direct.';
+    else if (convoyConn === 'online') connTxt = '🟢 Position partagée en direct' + (serverUrl() ? ' (serveur sécurisé).' : '.');
+    else if (convoyConn === 'denied') connTxt = '🔴 Clé conducteur refusée par le serveur.';
+    else if (convoyConn === 'offline' && serverUrl()) connTxt = '🟠 Serveur injoignable, nouvel essai…';
     else connTxt = '🟠 Connexion au relais…';
     $('convoy-conn').textContent = connTxt;
 
@@ -2827,6 +2881,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   $('convoy-btn').addEventListener('click', () => { renderConvoyUi(); $('convoy-overlay').classList.add('show'); });
   $('convoy-close').addEventListener('click', () => { $('convoy-overlay').classList.remove('show'); });
   $('convoy-name').addEventListener('input', (e) => { convoy.name = e.target.value.trim().slice(0, 24); saveConvoy(); lastConvoyPub = 0; });
+  $('convoy-server').addEventListener('change', (e) => { convoy.server = e.target.value.trim(); saveConvoy(); lastConvoyPub = 0; lastConvoyRouteKey = ''; renderConvoyUi(); });
+  $('convoy-key').addEventListener('change', (e) => { convoy.key = e.target.value.trim(); saveConvoy(); lastConvoyPub = 0; lastConvoyRouteKey = ''; renderConvoyUi(); });
   $('convoy-base').addEventListener('change', (e) => { convoy.base = e.target.value.trim(); saveConvoy(); renderConvoyUi(); });
   $('convoy-create').addEventListener('click', () => {
     if (!convoy.name){ $('convoy-name').focus(); setStatus('Donne d’abord un nom à ton véhicule.', true); return; }
@@ -2930,7 +2986,8 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
   const DEFAULT_URLS = [
     'wss://broker.emqx.io:8084/mqtt',
     'wss://broker.hivemq.com:8884/mqtt',
-    'wss://test.mosquitto.org:8081/'
+    'wss://test.mosquitto.org:8081/',
+    'wss://mqtt.eclipseprojects.io/mqtt'   // port 443 : passe plus souvent les pare-feu
   ];
 
   function MiniMQTT(opts){
@@ -2999,8 +3056,9 @@ const TOLLS_RAW = [{"r":"01A903905CD","n":"Beaupont","t":"Ech","l":"Echangeur","
       clearInterval(this.pingTimer);
       clearTimeout(this.connTimer);
       if (this.ended) return;
+      const failedUrl = this.urls[this.urlIdx % this.urls.length];
       if (!wasConnected) this.urlIdx++; // ce broker ne marche pas : on essaie le suivant
-      this._status('offline');
+      this._status('offline', wasConnected ? null : failedUrl);
       this._scheduleRetry();
     };
     ws.onerror = onGone;
