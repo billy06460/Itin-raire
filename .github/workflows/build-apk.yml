@@ -64,41 +64,11 @@ jobs:
       - name: Autoriser l'execution de gradlew
         run: chmod +x android/gradlew
 
-      # Toujours la MEME cle de signature (stockee dans les secrets GitHub) :
-      # sans ca, l'empreinte SHA-1 changerait a chaque build, ce qui casserait
-      # la restriction de la cle API Google configuree avec cette empreinte.
-      - name: Preparer la cle de signature
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Secret KEYSTORE_BASE64 manquant (Settings > Secrets and variables > Actions)"
-            exit 1
-          fi
-          CLEAN=$(printf '%s' "$KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=')
-          if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/itineraire.keystore" 2>/dev/null; then
-            echo "::error::KEYSTORE_BASE64 est incomplet ou mal copie. Recollez la longue ligne entiere du fichier secret."
-            exit 1
-          fi
-
-      - name: Compiler l'APK (signee avec la cle fixe)
+      # Pas de cle de signature fixe : l'APK est signee avec la cle de debug
+      # generee automatiquement par Android. Aucun secret GitHub n'est requis.
+      - name: Compiler l'APK
         working-directory: android
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        run: |
-          if [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::Secret KEYSTORE_PASSWORD manquant (Settings > Secrets and variables > Actions)"
-            exit 1
-          fi
-          if ! keytool -list -keystore "$RUNNER_TEMP/itineraire.keystore" -storepass "$KEYSTORE_PASSWORD" > /dev/null 2>&1; then
-            echo "::error::La cle ne s'ouvre pas : KEYSTORE_PASSWORD ou KEYSTORE_BASE64 mal copie."
-            exit 1
-          fi
-          ./gradlew assembleDebug --stacktrace \
-            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/itineraire.keystore" \
-            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias=itinerairepeages \
-            -Pandroid.injected.signing.key.password="$KEYSTORE_PASSWORD"
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Verifier le service GPS d'arriere-plan (information)
         run: |
