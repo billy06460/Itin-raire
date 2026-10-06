@@ -1,18 +1,16 @@
 {
   "name": "itineraire-peages",
   "version": "1.0.0",
-  "description": "Calcul d'itineraire et detection des gares de peage sur le trajet, embarque dans une app native via Capacitor.",
   "private": true,
-  "scripts": {
-    "sync": "npx cap sync",
-    "open:android": "npx cap open android",
-    "add:android": "npx cap add android"
-  },
+  "description": "Calcul d'itineraire et detection des gares de peage sur le trajet.",
+  "scripts": {},
   "dependencies": {
-    "@capacitor/android": "^6.1.2",
-    "@capacitor/core": "^6.1.2"
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/android": "^8.0.0",
+    "@capacitor-community/background-geolocation": "latest"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.1.2"
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/assets": "^3.0.5"
   }
 }
