@@ -1,112 +1,72 @@
 # Itinéraire & Péages
 
-Application de calcul d'itinéraire avec détection des gares de péage sur le
-trajet, packagée en application native Android/iOS via
-[Capacitor](https://capacitorjs.com/).
+Calcul d'itinéraire avec détection des gares de péage sur le trajet (jeu de
+données officiel embarqué), packagée en app Android via
+[Capacitor](https://capacitorjs.com/) et construite automatiquement par
+GitHub Actions.
 
-Tout le code de l'app (formulaire, carte, logique, jeu de données des gares
-de péage) vit dans un seul fichier : `www/index.html`. Capacitor se charge
-juste de l'emballer dans une vraie app native.
-
-## Pourquoi Capacitor plutôt qu'un simple wrapper WebView
-
-Contrairement à un outil comme WebIntoApp qui charge le HTML tel quel
-(`file://...`), Capacitor sert le contenu local via une véritable origine
-`https://localhost` (voir `"androidScheme": "https"` dans
-`capacitor.config.json`). Les requêtes réseau (géocodage, calcul
-d'itinéraire, tuiles de carte) envoient donc un `Origin`/`Referer` correct,
-ce qui règle les blocages rencontrés précédemment.
-
-## Prérequis
-
-- [Node.js](https://nodejs.org/) (18+) et npm
-- [Android Studio](https://developer.android.com/studio) (pour builder/tester en local)
-- Un compte GitHub, si tu veux utiliser la génération automatique d'APK par CI
-
-## Mettre ce projet sur GitHub (aucune installation locale requise)
-
-Le build de l'APK (npm install, ajout de la plateforme Android, compilation)
-est entièrement automatisé par `.github/workflows/build-android.yml` et
-s'exécute sur les serveurs de GitHub. Tu n'as donc besoin ni de Node.js, ni
-d'Android Studio en local pour obtenir un APK :
+## Mettre le dépôt sur GitHub
 
 ```bash
 cd capacitor-app
 git init
 git add .
-git commit -m "Init app Itinéraire & Péages (Capacitor)"
+git commit -m "Init app Itinéraire & Péages"
 git branch -M main
 git remote add origin https://github.com/<ton-compte>/<nom-du-repo>.git
 git push -u origin main
 ```
 
-Puis va dans l'onglet **Actions** du dépôt sur GitHub : le workflow démarre
-automatiquement, construit l'APK, et le propose en téléchargement dans la
-section "Artifacts" du run (compte 2 à 5 minutes).
+## Récupérer l'APK
 
-## Builder/tester en local à la place (optionnel)
+Onglet **Actions** du dépôt : le workflow se déclenche à chaque push sur
+`main` (ou via "Run workflow" pour le relancer manuellement). L'APK est
+ensuite disponible dans la section **Artifacts** du run, sous le nom
+`itineraire-peages-debug-apk`.
 
-Utile seulement si tu veux tester sur un émulateur ou modifier le projet
-natif directement. Nécessite Node.js et Android Studio.
+## À savoir pour le moment
 
-```bash
-# 1. Installer les dépendances
-npm install
+La signature persistante a été retirée pour le moment (sur demande) : chaque
+build est signé avec une clé de debug générée à la volée par le runner
+GitHub. Résultat, Android peut refuser de réinstaller une nouvelle version
+par-dessus l'ancienne ("conflit avec un package existant") — dans ce cas,
+désinstalle l'app avant de réinstaller le nouvel APK.
 
-# 2. Ajouter la plateforme Android (génère le dossier android/, une seule fois)
-npx cap add android
+Icône : par défaut, celle fournie par Capacitor, sauf si tu as ajouté
+`resources/icon.png` (voir plus haut).
 
-# 3. Copier www/ dans le projet natif et resynchroniser après chaque modif de l'app
-npx cap sync android
 
-# 4. Ouvrir le projet dans Android Studio pour lancer/tester sur un émulateur ou un téléphone
-npx cap open android
-```
+## Convoi : suivi à distance
 
-Depuis Android Studio : Run ▶ pour tester sur un appareil connecté, ou
-Build > Build Bundle(s)/APK(s) > Build APK(s) pour générer un `.apk`
-installable directement.
+Dans l'app, le bouton **👥 Convoi** permet de créer un convoi (un code unique)
+ou d'en rejoindre un. Pendant un trajet, chaque véhicule du convoi partage sa
+position ; elle s'affiche en direct sur la page `www/suivi.html` (une carte
+par convoi : le lien contient le code, `suivi.html?c=CODE`).
 
-À chaque fois que tu modifies `www/index.html`, relance `npx cap sync
-android` puis reconstruis dans Android Studio.
+Pour héberger la page de suivi gratuitement avec GitHub Pages :
 
-## Générer l'APK automatiquement via GitHub Actions
+1. Dépôt GitHub → **Settings → Pages → Source : GitHub Actions**.
+2. Pousse le projet (le workflow `pages.yml` publie `suivi.html`).
+3. L'adresse est `https://<ton-compte>.github.io/<nom-du-repo>/suivi.html`.
+   Colle-la dans l'app : **👥 Convoi → Adresse de la page de suivi**.
 
-Ce dépôt inclut `.github/workflows/build-android.yml` : à chaque push sur
-`main`, GitHub construit automatiquement un APK de debug et le met à
-disposition en téléchargement dans l'onglet **Actions** du dépôt (sous
-"Artifacts"), sans que tu aies besoin d'Android Studio.
+Les positions transitent par des relais MQTT publics gratuits (aucun compte à
+créer). Le code du convoi fait office de mot de passe : ne le donne qu'aux
+participants. Pour utiliser ton propre relais, définis `window.CONVOY_BROKERS`
+(liste d'adresses `wss://…`) avant le chargement de la page.
 
-## Mettre ce projet sur GitHub
 
-```bash
-cd capacitor-app
-git init
-git add .
-git commit -m "Init app Itinéraire & Péages (Capacitor)"
-git branch -M main
-git remote add origin https://github.com/<ton-compte>/<nom-du-repo>.git
-git push -u origin main
-```
+## GPS en arrière-plan
 
-Va ensuite dans l'onglet **Actions** du dépôt sur GitHub : le build de
-l'APK démarre automatiquement.
+Le suivi GPS utilise le plugin `@capacitor-community/background-geolocation`
+(service Android au premier plan, notification « Suivi GPS du trajet en
+cours »). Le trajet et le partage de convoi continuent écran éteint ou app
+réduite.
 
-## Icône et splash screen (optionnel)
+Au premier trajet, Android demande la localisation : choisis **Toujours
+autoriser** (et accepte les notifications). Pour éviter que le système coupe
+l'app, règle aussi **Batterie → Sans restriction** (raccourci : Réglages de
+l'app → « Ouvrir les réglages de l'app »).
 
-Pour personnaliser l'icône et l'écran de démarrage :
-
-```bash
-npm install @capacitor/assets --save-dev
-npx capacitor-assets generate
-```
-
-(nécessite de placer une image source dans `resources/icon.png` et
-`resources/splash.png`, voir la doc de
-[`@capacitor/assets`](https://github.com/ionic-team/capacitor-assets)).
-
-## Publier sur le Play Store
-
-Pour une publication officielle (pas seulement un test), il faudra signer
-l'APK/AAB avec une clé de release — voir la doc Capacitor :
-https://capacitorjs.com/docs/android/deploying-to-google-play
+Dans un navigateur (sans l'APK), l'app retombe automatiquement sur le GPS
+standard, qui s'arrête en arrière-plan.
